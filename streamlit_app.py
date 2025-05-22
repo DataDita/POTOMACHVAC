@@ -1,3 +1,4 @@
+import streamlit.components.v1 as components
 import streamlit as st
 import snowflake.snowpark as sp
 from snowflake.snowpark import Session
@@ -9,14 +10,9 @@ from PIL import Image, ImageOps
 import io
 import base64
 import pandas as pd
-import streamlit as st
-from snowflake.snowpark.functions import col
-import requests
 ##########################################################################################
 ##########################################################################################
 ##########################################################################################
-
-
 
 def crop_to_square(image_bytes):
     img = Image.open(io.BytesIO(image_bytes))
@@ -47,9 +43,9 @@ def get_session():
 
 # Role-based access control
 ROLE_ACCESS = {
-    'admin': ['Home', 'profile', 'customers', 'appointments', 'quotes', 'jobs', 'invoices', 'payments', 'reports', 'analytics', 'admin_tables', 'equipment'],
+    'admin': ['Home', 'profile', 'customers', 'appointments', 'quotes', 'invoices', 'payments', 'reports', 'analytics', 'admin_tables', 'equipment'],
     'office': ['Home', 'customers', 'appointments', 'equipment'],
-    'technician': ['Home', 'profile', 'quotes', 'jobs', 'invoices', 'payments', 'equipment'],
+    'technician': ['Home', 'profile', 'quotes', 'invoices', 'payments', 'equipment'],
     'driver': ['Home', 'profile', 'driver_tasks']
 }
 ##########################################################################################
@@ -487,37 +483,43 @@ def Home():
     # Appointments section
     with st.container(border=True):
         st.subheader("📅 Your Appointments")
-        
-        # Get all appointments (today + upcoming 7 days)
-        appointments = session.sql(f"""
-            SELECT 
-                a.appointmentid,
-                c.name AS customer_name,
-                c.phone AS customer_phone,
-                c.address AS customer_address,
-                a.scheduled_time,
-                a.status AS appointment_status,
-                CASE 
-                    WHEN DATE(a.scheduled_time) = CURRENT_DATE() THEN 'Today'
-                    WHEN DATE(a.scheduled_time) = DATEADD('day', 1, CURRENT_DATE()) THEN 'Tomorrow'
-                    ELSE TO_VARCHAR(a.scheduled_time, 'Mon DD')
-                END AS display_date
-            FROM appointments a
-            JOIN customers c ON a.customerid = c.customerid
-            WHERE a.technicianid = '{st.session_state.user_id}'
-            AND DATE(a.scheduled_time) BETWEEN CURRENT_DATE() AND DATEADD('day', 7, CURRENT_DATE())
-            ORDER BY a.scheduled_time
-        """).collect()
-        
-        if not appointments:
-            st.info("No appointments scheduled for the next 7 days")
-        else:
-            # Display appointments with 12-hour format times
-            for appt in appointments:
-                with st.expander(f"{appt['CUSTOMER_NAME']} - {appt['SCHEDULED_TIME'].strftime('%I:%M %p')}"):
-                    st.write(f"**Phone:** {appt['CUSTOMER_PHONE']}")
-                    st.write(f"**Address:** {appt['CUSTOMER_ADDRESS']}")
-                    st.write(f"**Status:** {appt['APPOINTMENT_STATUS'].capitalize()}")
+    
+    # Get all appointments (today + upcoming 7 days)
+    appointments = session.sql(f"""
+        SELECT 
+            a.appointmentid,
+            c.name AS customer_name,
+            c.phone AS customer_phone,
+            c.address AS customer_address,
+            a.scheduled_time,
+            TO_VARCHAR(a.scheduled_time, 'YYYY-MM-DD') AS appointment_date,
+            DAYNAME(a.scheduled_time) AS day_of_week,
+            TO_VARCHAR(a.scheduled_time, 'HH12:MI AM') AS time_formatted,
+            a.sta_tus AS appointment_status,
+            CASE 
+                WHEN DATE(a.scheduled_time) = CURRENT_DATE() THEN 'Today'
+                WHEN DATE(a.scheduled_time) = DATEADD('day', 1, CURRENT_DATE()) THEN 'Tomorrow'
+                ELSE TO_VARCHAR(a.scheduled_time, 'Mon DD')
+            END AS display_date
+        FROM appointments a
+        JOIN customers c ON a.customerid = c.customerid
+        WHERE a.technicianid = '{st.session_state.user_id}'
+        AND DATE(a.scheduled_time) BETWEEN CURRENT_DATE() AND DATEADD('day', 7, CURRENT_DATE())
+        ORDER BY a.scheduled_time
+    """).collect()
+    
+    if not appointments:
+        st.info("No appointments scheduled for the next 7 days")
+    else:
+        # Display appointments with date, day, and time
+        for appt in appointments:
+            with st.expander(f"{appt['DAY_OF_WEEK']}, {appt['APPOINTMENT_DATE']} - {appt['CUSTOMER_NAME']} ({appt['TIME_FORMATTED']})"):
+                st.write(f"**Date:** {appt['APPOINTMENT_DATE']} ({appt['DAY_OF_WEEK']})")
+                st.write(f"**Time:** {appt['TIME_FORMATTED']}")
+                st.write(f"**Customer:** {appt['CUSTOMER_NAME']}")
+                st.write(f"**Phone:** {appt['CUSTOMER_PHONE']}")
+                st.write(f"**Address:** {appt['CUSTOMER_ADDRESS']}")
+                st.write(f"**Status:** {appt['APPOINTMENT_STATUS'].capitalize()}")
 
    
  
@@ -529,9 +531,9 @@ def Home():
 #profile
 def profile_page():
     session = get_session()
-    st.title("User Page")
+    st.title("User Profile")
     
-    # --- 1. profile Picture Section ---
+    # --- 1. Profile Picture Section ---
     with st.container():
         col1, col2 = st.columns([1, 3])
         with col1:
@@ -551,7 +553,7 @@ def profile_page():
                 st.image(Image.new('RGB', (120, 120), color='lightgray'))
             
             # Picture upload
-            uploaded_file = st.file_uploader("Update profile Picture", type=["jpg", "jpeg", "png"])
+            uploaded_file = st.file_uploader("Update Profile Picture", type=["jpg", "jpeg", "png"])
             if uploaded_file and st.button("Update Picture"):
                 try:
                     img = Image.open(uploaded_file)
@@ -574,116 +576,120 @@ def profile_page():
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
 
-    # --- 2. Time Frame Selector ---
+    # --- 2. Weekly Schedule (Same as Admin View) ---
     with st.container():
-        st.subheader("Time Frame")
+        st.subheader("📅 Your Weekly Schedule")
+        
+        # Date range selection - default to current week
         today = datetime.now().date()
-        col1, col2 = st.columns(2)
-        with col1:
-            start_date = st.date_input("From Date", value=today - timedelta(days=today.weekday()))
-        with col2:
-            end_date = st.date_input("To Date", value=start_date + timedelta(days=6), min_value=start_date)
-    
-    # --- 3. Schedule Table ---
-    with st.container():
-        st.subheader("Your Weekly Schedule")
+        start_of_week = today - timedelta(days=today.weekday())
+        end_of_week = start_of_week + timedelta(days=6)
         
-        # Create empty schedule table
-        days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        schedule_data = {day: "" for day in days}
+        # Get employee name
+        employee_name = session.sql(f"""
+            SELECT ename FROM employees
+            WHERE employeeid = '{st.session_state.user_id}'
+        """).collect()[0]['ENAME']
         
-        # Get scheduled time entries for the selected period
-        time_entries = session.sql(f"""
-            SELECT 
-                DAYNAME(ENTRY_DATE) as day,
-                CLOCK_IN,
-                CLOCK_OUT,
-                TIMEDIFF('MINUTE', CLOCK_IN, CLOCK_OUT)/60.0 as hours_worked
-            FROM employee_time_entries
-            WHERE EMPLOYEEID = '{st.session_state.user_id}'
-            AND ENTRY_DATE BETWEEN '{start_date}' AND '{end_date}'
-            ORDER BY ENTRY_DATE
+        # Get all schedules for the current employee this week
+        schedules = session.sql(f"""
+            SELECT * FROM employee_schedules
+            WHERE employeeid = '{st.session_state.user_id}'
+            AND schedule_date BETWEEN '{start_of_week}' AND '{end_of_week}'
+            ORDER BY schedule_date, start_time
         """).collect()
         
-        # Populate schedule data
-        for entry in time_entries:
-            day = entry['DAY']
-            clock_in = entry['CLOCK_IN'].strftime('%I:%M %p') if entry['CLOCK_IN'] else ""
-            clock_out = entry['CLOCK_OUT'].strftime('%I:%M %p') if entry['CLOCK_OUT'] else ""
-            schedule_data[day] = f"{clock_in} - {clock_out}" if clock_in and clock_out else clock_in if clock_in else "Not scheduled"
+        # Create calendar view - days as columns, hours as rows
+        st.markdown("""
+        <style>
+            .employee-box {
+                display: inline-block;
+                background-color: #e6f7ff;
+                border-radius: 4px;
+                padding: 2px 6px;
+                margin: 2px;
+                font-size: 12px;
+                border: 1px solid #b3e0ff;
+            }
+            .schedule-table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            .schedule-table th, .schedule-table td {
+                border: 1px solid #ddd;
+                padding: 8px;
+                text-align: center;
+            }
+            .schedule-table th {
+                background-color: #f2f2f2;
+                font-weight: bold;
+            }
+            .time-col {
+                background-color: #f9f9f9;
+                font-weight: bold;
+            }
+        </style>
+        """, unsafe_allow_html=True)
         
-        # Display as table
-        schedule_df = pd.DataFrame({
-            "Day": days,
-            "Schedule": [schedule_data[day] for day in days]
-        })
+        # Define time slots (8AM to 6PM in 2-hour increments)
+        time_slots = [
+            ("8:00-10:00", time(8, 0), time(10, 0)),
+            ("10:00-12:00", time(10, 0), time(12, 0)),
+            ("12:00-14:00", time(12, 0), time(14, 0)),
+            ("14:00-16:00", time(14, 0), time(16, 0)),
+            ("16:00-18:00", time(16, 0), time(18, 0))
+        ]
         
-        st.dataframe(
-            schedule_df,
-            column_config={
-                "Day": st.column_config.Column(width="small"),
-                "Schedule": st.column_config.Column(width="medium")
-            },
-            hide_index=True,
-            use_container_width=True
-        )
-
-    # --- 4. Weekly Appointments Table ---
-    with st.container():
-        st.subheader("Your Weekly Appointments")
+        # Get all days in the week
+        days = [(start_of_week + timedelta(days=i)).strftime("%a %m/%d") for i in range(7)]
+        day_dates = [start_of_week + timedelta(days=i) for i in range(7)]
         
-        # Get appointments for selected period
-        appointments = session.sql(f"""
-            SELECT 
-                DAYNAME(scheduled_time) as day,
-                TO_TIME(scheduled_time) as time,
-                c.name as customer,
-                c.address,
-                c.phone,
-                a.status
-            FROM appointments a
-            JOIN customers c ON a.customerid = c.customerid
-            WHERE a.technicianid = '{st.session_state.user_id}'
-            AND DATE(a.scheduled_time) BETWEEN '{start_date}' AND '{end_date}'
-            ORDER BY a.scheduled_time
-        """).collect()
+        # Create HTML table
+        table_html = """
+        <table class="schedule-table">
+            <tr>
+                <th>Time Slot</th>
+        """
         
-        if appointments:
-            # Create structured table
-            appointments_data = []
-            for appt in appointments:
-                appointments_data.append({
-                    "Day": appt['DAY'],
-                    "Time": appt['TIME'].strftime('%I:%M %p'),
-                    "Customer": appt['CUSTOMER'],
-                    "Address": appt['ADDRESS'],
-                    "Phone": appt['PHONE'],
-                    "Status": appt['STATUS'].capitalize()
-                })
+        # Add day headers
+        for day in days:
+            table_html += f"<th>{day}</th>"
+        table_html += "</tr>"
+        
+        # Add time slots and employee boxes
+        for slot_name, slot_start, slot_end in time_slots:
+            table_html += f"<tr><td class='time-col'>{slot_name}</td>"
             
-            df_appointments = pd.DataFrame(appointments_data)
-            st.dataframe(
-                df_appointments,
-                column_config={
-                    "Day": st.column_config.Column(width="small"),
-                    "Time": st.column_config.Column(width="small"),
-                    "Customer": st.column_config.Column(width="medium"),
-                    "Address": st.column_config.Column(width="large"),
-                    "Phone": st.column_config.Column(width="small"),
-                    "Status": st.column_config.Column(width="small")
-                },
-                hide_index=True,
-                use_container_width=True
-            )
-        else:
-            st.info("No appointments scheduled for this period")
-
-    # --- 5. Time Records Table ---
-    # --- 5. Time Records Table ---
-    with st.container():
-        st.subheader("Time Records")
+            for day_date in day_dates:
+                # Find schedules for this day and time slot
+                scheduled = False
+                for s in schedules:
+                    if s['SCHEDULE_DATE'] == day_date:
+                        s_start = s['START_TIME']
+                        s_end = s['END_TIME']
+                        # Check if schedule overlaps with time slot
+                        if (s_start < slot_end) and (s_end > slot_start):
+                            scheduled = True
+                            break
+                
+                # Create cell with employee box if scheduled
+                table_html += "<td>"
+                if scheduled:
+                    table_html += f"<div class='employee-box'>{employee_name}</div>"
+                table_html += "</td>"
+            
+            table_html += "</tr>"
         
-        # Get time entries for selected period
+        table_html += "</table>"
+        
+        # Display the table
+        st.markdown(table_html, unsafe_allow_html=True)
+
+    # --- 3. Time Tracking Section ---
+    with st.container():
+        st.subheader("🕒 Time Tracking")
+        
+        # Get time entries for current week
         time_entries = session.sql(f"""
             SELECT 
                 ENTRY_DATE,
@@ -692,7 +698,7 @@ def profile_page():
                 TIMEDIFF('MINUTE', CLOCK_IN, CLOCK_OUT)/60.0 as hours_worked
             FROM employee_time_entries
             WHERE EMPLOYEEID = '{st.session_state.user_id}'
-            AND ENTRY_DATE BETWEEN '{start_date}' AND '{end_date}'
+            AND ENTRY_DATE BETWEEN '{start_of_week}' AND '{end_of_week}'
             ORDER BY ENTRY_DATE DESC, CLOCK_IN DESC
         """).collect()
         
@@ -710,14 +716,6 @@ def profile_page():
                     "Hours Worked": f"{hours:.2f}"
                 })
             
-            # Add total row
-            table_data.append({
-                "Date": "TOTAL",
-                "Clock In": "",
-                "Clock Out": "",
-                "Hours Worked": f"{total_hours:.2f}"
-            })
-            
             # Display table
             st.dataframe(
                 pd.DataFrame(table_data),
@@ -730,80 +728,766 @@ def profile_page():
                 hide_index=True,
                 use_container_width=True
             )
+            
+            # Display totals
+            st.metric("Total Hours Worked This Week", f"{total_hours:.2f}")
         else:
-            st.info(f"No time records found between {start_date} and {end_date}")
+            st.info("No time records found for this week")
 
-    # --- 6. Earnings Table ---
+    # --- 4. Upcoming Appointments ---
     with st.container():
-        st.subheader("Earnings Summary")
+        st.subheader("📅 Upcoming Appointments")
         
-        # First get the employee's hourly rate
-        emp = session.sql(f"""
-            SELECT hourlyrate FROM employees
-            WHERE employeeid = '{st.session_state.user_id}'
-        """).collect()[0]
-        
-        # Get earnings data for selected period
-        earnings = session.sql(f"""
+        # Get appointments for next 7 days
+        appointments = session.sql(f"""
             SELECT 
-                e.ENTRY_DATE as date,
-                SUM(TIMEDIFF('MINUTE', e.CLOCK_IN, e.CLOCK_OUT)/60.0) as hours_worked
-            FROM employee_time_entries e
-            WHERE e.employeeid = '{st.session_state.user_id}'
-            AND e.CLOCK_OUT IS NOT NULL
-            AND e.ENTRY_DATE BETWEEN '{start_date}' AND '{end_date}'
-            GROUP BY e.ENTRY_DATE
-            ORDER BY e.ENTRY_DATE DESC
+                c.name as customer_name,
+                c.phone as customer_phone,
+                c.address as customer_address,
+                a.scheduled_time,
+                TO_VARCHAR(a.scheduled_time, 'HH12:MI AM') AS time_formatted,
+                a.notes
+            FROM appointments a
+            JOIN customers c ON a.customerid = c.customerid
+            WHERE a.technicianid = '{st.session_state.user_id}'
+            AND DATE(a.scheduled_time) BETWEEN CURRENT_DATE() AND DATEADD('day', 7, CURRENT_DATE())
+            ORDER BY a.scheduled_time
         """).collect()
         
-        if earnings:
-            # Create earnings dataframe
-            earnings_data = []
-            total_hours = 0
-            total_earnings = 0
-            for row in earnings:
-                daily_hours = row['HOURS_WORKED']
-                daily_earnings = daily_hours * emp['HOURLYRATE']
-                total_hours += daily_hours
-                total_earnings += daily_earnings
-                earnings_data.append({
-                    "Date": row['DATE'].strftime('%Y-%m-%d'),
-                    "Hours Worked": f"{daily_hours:.2f}",
-                    "Hourly Rate": f"${emp['HOURLYRATE']:.2f}",
-                    "Earnings": f"${daily_earnings:.2f}"
-                })
-            
-            # Add total row
-            earnings_data.append({
-                "Date": "TOTAL",
-                "Hours Worked": f"{total_hours:.2f}",
-                "Hourly Rate": "",
-                "Earnings": f"${total_earnings:.2f}"
-            })
-            
-            df_earnings = pd.DataFrame(earnings_data)
-            
-            # Display table
-            st.dataframe(
-                df_earnings,
-                column_config={
-                    "Date": st.column_config.Column(width="small"),
-                    "Hours Worked": st.column_config.Column(width="small"),
-                    "Hourly Rate": st.column_config.Column(width="small"),
-                    "Earnings": st.column_config.Column(width="small")
-                },
-                hide_index=True,
-                use_container_width=True
-            )
+        if appointments:
+            for appt in appointments:
+                with st.expander(f"{appt['SCHEDULED_TIME'].strftime('%A %m/%d')} - {appt['CUSTOMER_NAME']} ({appt['TIME_FORMATTED']})"):
+                    st.write(f"**Customer:** {appt['CUSTOMER_NAME']}")
+                    st.write(f"**Phone:** {appt['CUSTOMER_PHONE']}")
+                    st.write(f"**Address:** {appt['CUSTOMER_ADDRESS']}")
+                    if appt['NOTES']:
+                        st.write(f"**Notes:** {appt['NOTES']}")
         else:
-            st.info("No earnings records found for this period")
+            st.info("No appointments scheduled for the next 7 days")
+      
+          
  
 
 ######################################################################            
 #######################################################################            
 #######################################################################
+
+
+#######################################################################
+#######################################################################
+#######################################################################
+#######################################################################
+# Customer management 
+
+def customer_management():
+    st.subheader("👥 Customer Management")
+    session = get_session()
+
+    # Initialize session state for form persistence
+    if 'customer_form_data' not in st.session_state:
+        st.session_state.customer_form_data = {
+            'name': '',
+            'phone': '',
+            'email': '',
+            'address': '',
+            'unit': '',
+            'city': '',
+            'state': 'MD',
+            'zipcode': '',
+            'latitude': 0.0,
+            'longitude': 0.0,
+            'has_lock_box': 'No',
+            'lock_box_code': '',
+            'how_heard': '',
+            'friend_name': '',
+            'note': ''
+        }
+
+    # --- Add New Customer Section ---
+    with st.expander("➕ Add New Customer", expanded=False):
+        with st.form("add_customer_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                name = st.text_input("Full Name*", value=st.session_state.customer_form_data['name'])
+                phone = st.text_input("Phone* (###-###-####)", value=st.session_state.customer_form_data['phone'], placeholder="301-555-1234")
+                email = st.text_input("Email", value=st.session_state.customer_form_data['email'])
+                address = st.text_input("Address*", value=st.session_state.customer_form_data['address'])
+                unit = st.text_input("Unit/Apt", value=st.session_state.customer_form_data['unit'])
+                
+            with col2:
+                city = st.text_input("City*", value=st.session_state.customer_form_data['city'])
+                state = st.selectbox("State*", ["MD", "DC", "VA"], index=["MD", "DC", "VA"].index(st.session_state.customer_form_data['state']))
+                zipcode = st.text_input("Zip Code* (5 or 9 digits)", value=st.session_state.customer_form_data['zipcode'])
+                
+                # How Heard section
+                how_heard = st.selectbox(
+                    "How did you hear about us?",
+                    ["", "Google", "Friend", "Facebook", "Yelp", "Other"],
+                    index=0
+                )
+                
+                # Show friend name field only if "Friend" is selected
+                friend_name = ""
+                if how_heard == "Friend":
+                    friend_name = st.text_input("Friend's Name*", value=st.session_state.customer_form_data['friend_name'])
+                
+                # Lock Box section
+                has_lock_box = st.radio("Lock Box", ["No", "Yes"], index=0 if st.session_state.customer_form_data['has_lock_box'] == 'No' else 1, horizontal=True)
+                
+                # Show lock box code only if "Yes" is selected
+                lock_box_code = ""
+                if has_lock_box == "Yes":
+                    lock_box_code = st.text_input("Lock Box Code*", value=st.session_state.customer_form_data['lock_box_code'])
+            
+            # Additional fields
+            note = st.text_area("Note", value=st.session_state.customer_form_data['note'])
+
+            # Submit button for the form
+            submitted = st.form_submit_button("Add Customer")
+            
+            if submitted:
+                # Store all values in session state for persistence
+                st.session_state.customer_form_data = {
+                    'name': name,
+                    'phone': phone,
+                    'email': email,
+                    'address': address,
+                    'unit': unit,
+                    'city': city,
+                    'state': state,
+                    'zipcode': zipcode,
+                    'latitude': 0.0,
+                    'longitude': 0.0,
+                    'has_lock_box': has_lock_box,
+                    'lock_box_code': lock_box_code,
+                    'how_heard': how_heard,
+                    'friend_name': friend_name if how_heard == "Friend" else "",
+                    'note': note
+                }
+
+                # Validate required fields
+                errors = []
+                if not name:
+                    errors.append("Full Name is required")
+                if not phone:
+                    errors.append("Phone is required")
+                elif not re.match(r"^\d{3}-\d{3}-\d{4}$", phone):
+                    errors.append("Invalid phone format (use ###-###-####)")
+                if not address:
+                    errors.append("Address is required")
+                if not city:
+                    errors.append("City is required")
+                if not state:
+                    errors.append("State is required")
+                if not zipcode:
+                    errors.append("Zip Code is required")
+                elif not re.match(r"^\d{5}(-\d{4})?$", zipcode):
+                    errors.append("Invalid zip code format (use 5 or 9 digits)")
+                if email and not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", email):
+                    errors.append("Invalid email format")
+                if has_lock_box == "Yes" and not lock_box_code:
+                    errors.append("Lock Box Code is required when Lock Box is Yes")
+                if how_heard == "Friend" and not friend_name:
+                    errors.append("Friend's Name is required when referral is from a friend")
+
+                if errors:
+                    for error in errors:
+                        st.error(error)
+                else:
+                    try:
+                        # Get the next customer ID
+                        last_customer = session.sql("""
+                            SELECT CUSTOMERID FROM customers 
+                            ORDER BY CUSTOMERID DESC 
+                            LIMIT 1
+                        """).collect()
+                        
+                        if last_customer:
+                            last_id = last_customer[0]['CUSTOMERID']
+                            if last_id.startswith('CU'):
+                                try:
+                                    next_num = int(last_id[2:]) + 1
+                                    customer_id = f"CU{next_num}"
+                                except:
+                                    customer_id = "CU100"
+                            else:
+                                customer_id = "CU100"
+                        else:
+                            customer_id = "CU100"
+                        
+                        # Prepare how_heard value
+                        how_heard_value = how_heard
+                        if how_heard == "Friend":
+                            how_heard_value = f"Friend: {friend_name}"
+                        
+                        # Build the insert query with proper string escaping
+                        email_escaped = email.replace("'", "''") if email else None
+                        unit_escaped = unit.replace("'", "''") if unit else None
+                        lock_box_code_escaped = lock_box_code.replace("'", "''") if lock_box_code else None
+                        how_heard_value_escaped = how_heard_value.replace("'", "''") if how_heard_value else None
+                        note_escaped = note.replace("'", "''") if note else None
+                        
+                        insert_query = f"""
+                            INSERT INTO customers 
+                            (CUSTOMERID, NAME, PHONE, EMAIL, ADDRESS, UNIT, CITY, STATE, ZIPCODE,
+                             LATITUDE, LONGITUDE, HAS_LOCK_BOX, LOCK_BOX_CODE, HOW_HEARD, NOTE)
+                            VALUES (
+                                '{customer_id}',
+                                '{name.replace("'", "''")}',
+                                '{phone.replace("'", "''")}',
+                                {f"'{email_escaped}'" if email else 'NULL'},
+                                '{address.replace("'", "''")}',
+                                {f"'{unit_escaped}'" if unit else 'NULL'},
+                                '{city.replace("'", "''")}',
+                                '{state}',
+                                '{zipcode}',
+                                0.0,
+                                0.0,
+                                '{has_lock_box}',
+                                {f"'{lock_box_code_escaped}'" if lock_box_code else 'NULL'},
+                                {f"'{how_heard_value_escaped}'" if how_heard_value else 'NULL'},
+                                {f"'{note_escaped}'" if note else 'NULL'}
+                            )
+                        """
+                        
+                        session.sql(insert_query).collect()
+                        st.success(f"✅ Customer added successfully! Customer ID: {customer_id}")
+                        
+                        # Clear form data after successful submission
+                        st.session_state.customer_form_data = {
+                            'name': '',
+                            'phone': '',
+                            'email': '',
+                            'address': '',
+                            'unit': '',
+                            'city': '',
+                            'state': 'MD',
+                            'zipcode': '',
+                            'latitude': 0.0,
+                            'longitude': 0.0,
+                            'has_lock_box': 'No',
+                            'lock_box_code': '',
+                            'how_heard': '',
+                            'friend_name': '',
+                            'note': ''
+                        }
+                        
+                        # Force a rerun to clear the form
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Error adding customer: {str(e)}")
+
+    # --- Customer Search and Edit Section ---
+    st.subheader("🔍 Search Customers")
+    search_term = st.text_input("", placeholder="Search by name, phone, email, or address", key="unified_search")
+    
+    if search_term:
+        customers = session.sql(f"""
+            SELECT * FROM customers 
+            WHERE NAME ILIKE '%{search_term}%' 
+               OR PHONE ILIKE '%{search_term}%'
+               OR EMAIL ILIKE '%{search_term}%'
+               OR ADDRESS ILIKE '%{search_term}%'
+            ORDER BY NAME
+        """).collect()
+        
+        if customers:
+            for customer in customers:
+                with st.expander(f"{customer['NAME']} - {customer['PHONE']}"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write(f"**Customer ID:** {customer['CUSTOMERID']}")
+                        st.write(f"**Email:** {customer['EMAIL'] or 'Not provided'}")
+                        st.write(f"**Address:** {customer['ADDRESS']}")
+                        
+                    with col2:
+                        st.write(f"**Lock Box:** {'Yes' if customer.get('HAS_LOCK_BOX', False) else 'No'}")
+                        if customer.get('HAS_LOCK_BOX', False):
+                            st.write(f"**Lock Box Code:** {customer.get('LOCK_BOX_CODE', 'Not provided')}")
+                        st.write(f"**How Heard:** {customer.get('HOW_HEARD', 'Not specified')}")
+                    
+                    st.write(f"**Note:** {customer.get('NOTE', 'None')}")
+                    
+                    # Action buttons
+                    if st.button("Edit", key=f"edit_{customer['CUSTOMERID']}"):
+                        st.session_state['edit_customer'] = customer['CUSTOMERID']
+                        st.session_state['customer_to_edit'] = customer
+
+    # --- Edit Customer Form ---
+    if 'edit_customer' in st.session_state and 'customer_to_edit' in st.session_state:
+        edit_customer_id = st.session_state['edit_customer']
+        customer_to_edit = st.session_state['customer_to_edit']
+        
+        st.subheader("✏️ Edit Customer")
+        with st.form("edit_customer_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                name = st.text_input("Full Name*", value=customer_to_edit['NAME'])
+                phone = st.text_input("Phone*", value=customer_to_edit['PHONE'])
+                email = st.text_input("Email", value=customer_to_edit['EMAIL'] or "")
+                address = st.text_input("Address*", value=customer_to_edit['ADDRESS'])
+                
+            with col2:
+                # Parse how_heard value safely
+                how_heard_value = customer_to_edit.get('HOW_HEARD', '') or ''
+                if isinstance(how_heard_value, str):
+                    if ":" in how_heard_value:
+                        how_heard = how_heard_value.split(":")[0].strip()
+                        friend_name = how_heard_value.split(":")[1].strip() if how_heard == "Friend" else ""
+                    else:
+                        how_heard = how_heard_value
+                        friend_name = ""
+                else:
+                    how_heard = ""
+                    friend_name = ""
+                
+                # How Heard section
+                how_heard = st.selectbox(
+                    "How did you hear about us?",
+                    ["", "Google", "Friend", "Facebook", "Yelp", "Other"],
+                    index=["", "Google", "Friend", "Facebook", "Yelp", "Other"].index(how_heard) if how_heard in ["", "Google", "Friend", "Facebook", "Yelp", "Other"] else 0
+                )
+                
+                # Show friend name field only if "Friend" is selected
+                edit_friend_name = ""
+                if how_heard == "Friend":
+                    edit_friend_name = st.text_input("Friend's Name*", value=friend_name)
+                
+                # Lock Box section
+                has_lock_box = st.radio(
+                    "Lock Box", 
+                    ["No", "Yes"], 
+                    horizontal=True,
+                    index=1 if customer_to_edit.get('HAS_LOCK_BOX', False) else 0
+                )
+                
+                # Show code input if Lock Box is Yes
+                lock_box_code = ""
+                if has_lock_box == "Yes":
+                    lock_box_code = st.text_input("Lock Box Code*", value=customer_to_edit.get('LOCK_BOX_CODE', ''))
+                
+                note = st.text_area("Note", value=customer_to_edit.get('NOTE', ''))
+            
+            # Description/notes
+            description = st.text_area("Customer Request", value=customer_to_edit.get('REQUEST', ''))
+            
+            # Form submit button
+            submitted = st.form_submit_button("💾 Save Changes")
+            
+            if submitted:
+                # Validate inputs
+                if not all([name, phone, address]):
+                    st.error("Please fill in all required fields (*)")
+                elif not re.match(r"^\d{3}-\d{3}-\d{4}$", phone):
+                    st.error("Invalid phone number format. Please use ###-###-####")
+                elif has_lock_box == "Yes" and not lock_box_code:
+                    st.error("Please enter Lock Box Code when Lock Box is set to Yes")
+                elif how_heard == "Friend" and not edit_friend_name:
+                    st.error("Please enter Friend's Name when referral is from a friend")
+                else:
+                    try:
+                        # Prepare how_heard value
+                        how_heard_value = how_heard
+                        if how_heard == "Friend":
+                            how_heard_value = f"Friend: {edit_friend_name}"
+                        
+                        # Prepare SQL values with proper escaping
+                        email_escaped = email.replace("'", "''") if email else None
+                        lock_box_code_escaped = lock_box_code.replace("'", "''") if lock_box_code else None
+                        how_heard_value_escaped = how_heard_value.replace("'", "''") if how_heard_value else None
+                        note_escaped = note.replace("'", "''") if note else None
+                        description_escaped = description.replace("'", "''") if description else None
+                        
+                        # Update customer record
+                        update_query = f"""
+                            UPDATE customers 
+                            SET NAME = '{name.replace("'", "''")}',
+                                PHONE = '{phone.replace("'", "''")}',
+                                EMAIL = {f"'{email_escaped}'" if email else 'NULL'},
+                                ADDRESS = '{address.replace("'", "''")}',
+                                HAS_LOCK_BOX = {'TRUE' if has_lock_box == 'Yes' else 'FALSE'},
+                                LOCK_BOX_CODE = {f"'{lock_box_code_escaped}'" if lock_box_code else 'NULL'},
+                                HOW_HEARD = {f"'{how_heard_value_escaped}'" if how_heard_value else 'NULL'},
+                                NOTE = {f"'{note_escaped}'" if note else 'NULL'},
+                                REQUEST = {f"'{description_escaped}'" if description else 'NULL'}
+                            WHERE CUSTOMERID = '{edit_customer_id}'
+                        """
+                        
+                        session.sql(update_query).collect()
+                        st.success("Customer updated successfully!")
+                        del st.session_state['edit_customer']
+                        del st.session_state['customer_to_edit']
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error updating customer: {str(e)}")
+            
+            # Cancel button
+            if st.button("❌ Cancel"):
+                del st.session_state['edit_customer']
+                del st.session_state['customer_to_edit']
+                st.rerun()
+#######################################################################
+#######################################################################
+#######################################################################
+#######################################################################
+######################################################################
+
+#Appointment 
+
+def appointments():
+    st.subheader("📅 Appointment Scheduling")
+    session = get_session()
+
+    # --- Step 1: Customer Selection ---
+    st.subheader("1. Select Customer")
+    search_query = st.text_input("Search by Name, Phone, Email, or Address", key="customer_search")
+    
+    # Fetch customers
+    customers = session.sql(f"""
+        SELECT customerid, name, phone FROM customers 
+        {'WHERE NAME ILIKE ' + f"'%{search_query}%'" if search_query else ''}
+        ORDER BY name
+    """).collect()
+    
+    if not customers:
+        st.warning("No customers found")
+        return
+    
+    selected_customer_id = st.selectbox(
+        "Select Customer",
+        options=[row['CUSTOMERID'] for row in customers],
+        format_func=lambda x: next(f"{row['NAME']} ({row['PHONE']})" for row in customers if row['CUSTOMERID'] == x)
+    )
+
+    # --- Step 2: Service Request ---
+    st.subheader("2. Service Request")
+    request_type = st.selectbox(
+        "Select Request Type",
+        ["Install", "Service", "Estimate"],
+        index=0
+    )
+
+    # Get qualified technicians
+    expertise_map = {"Install": "EX1", "Service": "EX2", "Estimate": "EX3"}
+    technicians = session.sql(f"""
+        SELECT e.employeeid, e.ename 
+        FROM employees e
+        JOIN employee_expertise ee ON e.employeeid = ee.employeeid
+        WHERE ee.expertiseid = '{expertise_map[request_type]}'
+    """).collect()
+    
+    if not technicians:
+        st.error("No technicians available")
+        return
+
+    # --- Different Logic for Install vs Other Services ---
+    if request_type == "Install":
+        # Full-day booking for installations
+        st.subheader("3. Select Installation Date")
+        
+        # Show 4 weeks of available dates
+        start_date = datetime.now().date()
+        dates = [start_date + timedelta(days=i) for i in range(28)]
+        
+        # Get already booked installation days
+        booked_days = session.sql(f"""
+            SELECT DISTINCT DATE(scheduled_time) as day 
+            FROM appointments 
+            WHERE service_type = 'Install'
+            AND DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=28)}'
+        """).collect()
+        booked_days = [row['DAY'] for row in booked_days]
+        
+        # Display available dates
+        cols = st.columns(7)
+        for i, date in enumerate(dates):
+            with cols[i % 7]:
+                if date in booked_days:
+                    st.button(
+                        f"{date.strftime('%a %m/%d')}",
+                        disabled=True,
+                        key=f"install_day_{date}"
+                    )
+                else:
+                    if st.button(
+                        f"{date.strftime('%a %m/%d')}",
+                        key=f"install_day_{date}"
+                    ):
+                        st.session_state.selected_install_date = date
+        
+        # Handle installation booking
+        if 'selected_install_date' in st.session_state:
+            date = st.session_state.selected_install_date
+            st.success(f"Selected installation date: {date.strftime('%A, %B %d')}")
+            
+            # Select primary technician
+            primary_tech = st.selectbox(
+                "Primary Technician",
+                options=[t['EMPLOYEEID'] for t in technicians],
+                format_func=lambda x: next(t['ENAME'] for t in technicians if t['EMPLOYEEID'] == x)
+            )
+            
+            # Select secondary technician (optional)
+            secondary_techs = [t for t in technicians if t['EMPLOYEEID'] != primary_tech]
+            secondary_tech = st.selectbox(
+                "Additional Technician (Optional)",
+                options=[""] + [t['EMPLOYEEID'] for t in secondary_techs],
+                format_func=lambda x: next(t['ENAME'] for t in technicians if t['EMPLOYEEID'] == x) if x else "None"
+            )
+            
+            notes = st.text_area("Installation Notes")
+            
+            if st.button("Book Installation"):
+                try:
+                    # Book primary technician for full day (8AM-5PM)
+                    session.sql(f"""
+                        INSERT INTO appointments (
+                            appointmentid, customerid, technicianid,
+                            scheduled_time, service_type, notes, sta_tus
+                        ) VALUES (
+                            'APT{datetime.now().timestamp()}',
+                            '{selected_customer_id}',
+                            '{primary_tech}',
+                            '{datetime.combine(date, time(8,0))}',
+                            'Install',
+                            '{notes}',
+                            'scheduled'
+                        )
+                    """).collect()
+                    
+                    # Book secondary technician if selected
+                    if secondary_tech:
+                        session.sql(f"""
+                            INSERT INTO appointments (
+                                appointmentid, customerid, technicianid,
+                                scheduled_time, service_type, notes, sta_tus
+                            ) VALUES (
+                                'APT{datetime.now().timestamp()}',
+                                '{selected_customer_id}',
+                                '{secondary_tech}',
+                                '{datetime.combine(date, time(8,0))}',
+                                'Install-Assist',
+                                '{notes}',
+                                'scheduled'
+                            )
+                        """).collect()
+                    
+                    st.success(f"Installation booked for {date.strftime('%A, %B %d')}!")
+                    del st.session_state.selected_install_date
+                    st.rerun()
+                
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
+
+    else:
+        # Standard 2-hour slots for non-installation services
+        st.subheader("3. Select Appointment Time")
+        
+        # Week navigation
+        today = datetime.now().date()
+        if 'week_offset' not in st.session_state:
+            st.session_state.week_offset = 0
+        
+        col1, col2, col3 = st.columns([2,1,1])
+        with col1:
+            st.write(f"Week of {(today + timedelta(weeks=st.session_state.week_offset)).strftime('%B %d')}")
+        with col2:
+            if st.button("◀ Previous Week"):
+                st.session_state.week_offset -= 1
+                st.rerun()
+        with col3:
+            if st.button("Next Week ▶"):
+                st.session_state.week_offset += 1
+                st.rerun()
+        
+        start_date = today + timedelta(weeks=st.session_state.week_offset) - timedelta(days=today.weekday())
+        days = [start_date + timedelta(days=i) for i in range(7)]
+        
+        # Get existing appointments
+        appointments = session.sql(f"""
+            SELECT * FROM appointments
+            WHERE DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
+            AND sta_tus != 'cancelled'
+        """).collect()
+        
+        # Create calendar with 2-hour slots (8AM-6PM)
+        time_slots = [time(hour) for hour in range(8, 19, 2)]  # 8AM, 10AM, 12PM, 2PM, 4PM, 6PM
+        
+        for day in days:
+            with st.expander(day.strftime("%A %m/%d"), expanded=True):
+                cols = st.columns(len(time_slots))
+                
+                for i, time_slot in enumerate(time_slots):
+                    slot_start = datetime.combine(day, time_slot)
+                    slot_end = slot_start + timedelta(hours=2)
+                    
+                    with cols[i]:
+                        # Check technician availability
+                        available_techs = []
+                        for tech in technicians:
+                            tech_id = tech['EMPLOYEEID']
+                            
+                            # Check for overlapping appointments
+                            is_busy = any(
+                                a for a in appointments 
+                                if a['TECHNICIANID'] == tech_id
+                                and datetime.combine(day, a['SCHEDULED_TIME'].time()) < slot_end
+                                and (datetime.combine(day, a['SCHEDULED_TIME'].time()) + timedelta(hours=2)) > slot_start
+                            )
+                            
+                            if not is_busy:
+                                available_techs.append(tech)
+                        
+                        # Display time slot (8-10 format)
+                        slot_label = f"{time_slot.hour}-{(time_slot.hour+2)%12 or 12}"
+                        
+                        if available_techs:
+                            if st.button(
+                                slot_label,
+                                key=f"slot_{day}_{time_slot}",
+                                help="Available: " + ", ".join([t['ENAME'].split()[0] for t in available_techs])
+                            ):
+                                st.session_state.selected_slot = {
+                                    'datetime': slot_start,
+                                    'techs': available_techs
+                                }
+                        else:
+                            st.button(
+                                slot_label,
+                                disabled=True,
+                                key=f"slot_{day}_{time_slot}_disabled"
+                            )
+        
+        # Handle slot selection for non-install services
+        if 'selected_slot' in st.session_state:
+            slot = st.session_state.selected_slot
+            time_range = f"{slot['datetime'].hour}-{slot['datetime'].hour+2}"
+            st.success(f"Selected: {slot['datetime'].strftime('%A %m/%d')} {time_range}")
+            
+            # Primary technician selection
+            primary_tech = st.selectbox(
+                "Primary Technician",
+                options=[t['EMPLOYEEID'] for t in slot['techs']],
+                format_func=lambda x: next(t['ENAME'] for t in slot['techs'] if t['EMPLOYEEID'] == x)
+            )
+            
+            # Secondary technician selection (optional)
+            secondary_techs = [t for t in slot['techs'] if t['EMPLOYEEID'] != primary_tech]
+            secondary_tech = st.selectbox(
+                "Additional Technician (Optional)",
+                options=[""] + [t['EMPLOYEEID'] for t in secondary_techs],
+                format_func=lambda x: next(t['ENAME'] for t in slot['techs'] if t['EMPLOYEEID'] == x) if x else "None"
+            )
+            
+            notes = st.text_area("Service Notes")
+            
+            if st.button("Book Appointment"):
+                try:
+                    # Check availability again
+                    existing = session.sql(f"""
+                        SELECT * FROM appointments
+                        WHERE technicianid = '{primary_tech}'
+                        AND DATE(scheduled_time) = '{slot['datetime'].date()}'
+                        AND HOUR(scheduled_time) = {slot['datetime'].hour}
+                        AND sta_tus != 'cancelled'
+                    """).collect()
+                    
+                    if existing:
+                        st.error("Time slot no longer available")
+                        del st.session_state.selected_slot
+                        st.rerun()
+                    
+                    # Book primary technician
+                    session.sql(f"""
+                        INSERT INTO appointments (
+                            appointmentid, customerid, technicianid, 
+                            scheduled_time, service_type, notes, sta_tus
+                        ) VALUES (
+                            'APT{datetime.now().timestamp()}',
+                            '{selected_customer_id}',
+                            '{primary_tech}',
+                            '{slot['datetime']}',
+                            '{request_type}',
+                            '{notes}',
+                            'scheduled'
+                        )
+                    """).collect()
+                    
+                    # Book secondary technician if selected
+                    if secondary_tech:
+                        session.sql(f"""
+                            INSERT INTO appointments (
+                                appointmentid, customerid, technicianid, 
+                                scheduled_time, service_type, notes, sta_tus
+                            ) VALUES (
+                                'APT{datetime.now().timestamp()}',
+                                '{selected_customer_id}',
+                                '{secondary_tech}',
+                                '{slot['datetime']}',
+                                '{request_type}-Assist',
+                                '{notes}',
+                                'scheduled'
+                            )
+                        """).collect()
+                    
+                    st.success(f"Appointment booked for {time_range}!")
+                    del st.session_state.selected_slot
+                    st.rerun()
+                
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
+
+    # --- Current Appointments Display ---
+    st.subheader("Current Appointments This Week")
+    current_appts = session.sql(f"""
+        SELECT 
+            a.appointmentid,
+            c.name as customer_name,
+            e.ename as technician_name,
+            a.scheduled_time,
+            a.service_type,
+            a.sta_tus,
+            a.notes
+        FROM appointments a
+        JOIN customers c ON a.customerid = c.customerid
+        JOIN employees e ON a.technicianid = e.employeeid
+        WHERE DATE(a.scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
+        ORDER BY a.scheduled_time
+    """).collect()
+    
+    if current_appts:
+        appt_data = []
+        for appt in current_appts:
+            start = appt['SCHEDULED_TIME']
+            time_range = f"{start.hour}-{start.hour+2}"
+            
+            appt_data.append({
+                "Date": start.strftime('%a %m/%d'),
+                "Time": time_range,
+                "Customer": appt['CUSTOMER_NAME'],
+                "Technician": appt['TECHNICIAN_NAME'],
+                "Service": appt['SERVICE_TYPE'],
+                "Status": appt['STA_TUS']
+            })
+        
+        st.dataframe(
+            pd.DataFrame(appt_data),
+            hide_index=True,
+            use_container_width=True
+        )
+    else:
+        st.info("No appointments scheduled for this week")
+
+
+    
+#######################################################################
+#######################################################################
 def equipment_management():
-    st.subheader("🛠️ Job")
+    st.subheader("🛠️ ")
     session = get_session()
 
     # Search and select a customer
@@ -993,597 +1677,6 @@ def equipment_management():
 
 
 
-#######################################################################
-#######################################################################
-#######################################################################
-#######################################################################
-# Customer management 
-def customer_management():
-    st.subheader("👥 Customer Management")
-    session = get_session()
-
-    # Initialize session state for form persistence
-    if 'customer_form_data' not in st.session_state:
-        st.session_state.customer_form_data = {
-            'name': '',
-            'phone': '',
-            'email': '',
-            'address': '',
-            'unit': '',
-            'city': '',
-            'state': 'MD',
-            'zipcode': '',
-            'latitude': 0.0,
-            'longitude': 0.0,
-            'has_lock_box': 'No',
-            'lock_box_code': '',
-            'how_heard': '',
-            'note': ''
-        }
-
-    # Add a new customer
-    with st.expander("➕ Add New Customer", expanded=False):
-        with st.form("add_customer_form", clear_on_submit=False):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                name = st.text_input("Full Name*", 
-                                   value=st.session_state.customer_form_data['name'],
-                                   key="name_input")
-                phone = st.text_input("Phone* (###-###-####)", 
-                                    value=st.session_state.customer_form_data['phone'],
-                                    placeholder="301-555-1234", 
-                                    key="phone_input")
-                email = st.text_input("Email", 
-                                    value=st.session_state.customer_form_data['email'],
-                                    key="email_input")
-                address = st.text_input("Address*", 
-                                      value=st.session_state.customer_form_data['address'],
-                                      key="address_input")
-                unit = st.text_input("Unit/Apt", 
-                                   value=st.session_state.customer_form_data['unit'],
-                                   key="unit_input")
-                
-            with col2:
-                city = st.text_input("City*", 
-                                   value=st.session_state.customer_form_data['city'],
-                                   key="city_input")
-                state = st.selectbox("State*", 
-                                   ["MD", "DC", "VA"],
-                                   index=["MD", "DC", "VA"].index(st.session_state.customer_form_data['state']),
-                                   key="state_input")
-                zipcode = st.text_input("Zip Code* (5 or 9 digits)", 
-                                      value=st.session_state.customer_form_data['zipcode'],
-                                      key="zip_input")
-                how_heard = st.text_input("How did you hear about us?", 
-                                       value=st.session_state.customer_form_data['how_heard'],
-                                       key="how_heard_input")
-                
-                # Lock Box section - always show the code field but mark as required conditionally
-                has_lock_box = st.radio("Lock Box", 
-                                      ["No", "Yes"],
-                                      index=0 if st.session_state.customer_form_data['has_lock_box'] == 'No' else 1,
-                                      horizontal=True, 
-                                      key="lock_box_input")
-                
-                lock_box_code = st.text_input(
-                    "Lock Box Code" + ("*" if has_lock_box == "Yes" else ""), 
-                    value=st.session_state.customer_form_data['lock_box_code'],
-                    key="lock_box_code_input"
-                )
-            
-            # Additional fields
-            latitude = st.number_input("Latitude", 
-                                     format="%.6f", 
-                                     value=float(st.session_state.customer_form_data['latitude']),
-                                     key="lat_input")
-            longitude = st.number_input("Longitude", 
-                                      format="%.6f", 
-                                      value=float(st.session_state.customer_form_data['longitude']),
-                                      key="long_input")
-            note = st.text_area("Note", 
-                              value=st.session_state.customer_form_data['note'],
-                              key="note_input")
-
-            submit_button = st.form_submit_button("Add Customer")
-            
-            if submit_button:
-                # Store all values in session state for persistence
-                st.session_state.customer_form_data = {
-                    'name': name,
-                    'phone': phone,
-                    'email': email,
-                    'address': address,
-                    'unit': unit,
-                    'city': city,
-                    'state': state,
-                    'zipcode': zipcode,
-                    'latitude': latitude,
-                    'longitude': longitude,
-                    'has_lock_box': has_lock_box,
-                    'lock_box_code': lock_box_code,
-                    'how_heard': how_heard,
-                    'note': note
-                }
-
-                # Validate required fields
-                errors = []
-                if not name:
-                    errors.append("Full Name is required")
-                if not phone:
-                    errors.append("Phone is required")
-                elif not re.match(r"^\d{3}-\d{3}-\d{4}$", phone):
-                    errors.append("Invalid phone format (use ###-###-####)")
-                if not address:
-                    errors.append("Address is required")
-                if not city:
-                    errors.append("City is required")
-                if not state:
-                    errors.append("State is required")
-                if not zipcode:
-                    errors.append("Zip Code is required")
-                elif not re.match(r"^\d{5}(-\d{4})?$", zipcode):
-                    errors.append("Invalid zip code format (use 5 or 9 digits)")
-                if email and not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", email):
-                    errors.append("Invalid email format")
-                if has_lock_box == "Yes" and not lock_box_code:
-                    errors.append("Lock Box Code is required when Lock Box is Yes")
-
-                if errors:
-                    for error in errors:
-                        st.error(error)
-                else:
-                    try:
-                        # Check if customer already exists
-                        existing_query = """
-                            SELECT * FROM customers 
-                            WHERE PHONE = '{}' 
-                            OR (EMAIL IS NOT NULL AND EMAIL = '{}')
-                        """.format(phone.replace("'", "''"), 
-                                  email.replace("'", "''") if email else "")
-                        existing_customer = session.sql(existing_query).collect()
-                        
-                        if existing_customer:
-                            st.warning("Customer already exists:")
-                            st.write(f"Name: {existing_customer[0]['NAME']}")
-                            st.write(f"Phone: {existing_customer[0]['PHONE']}")
-                            if existing_customer[0]['EMAIL']:
-                                st.write(f"Email: {existing_customer[0]['EMAIL']}")
-                            st.write(f"Customer ID: {existing_customer[0]['CUSTOMERID']}")
-                        else:
-                            # Generate customer ID
-                            customer_id = "CUST{}".format(int(datetime.now().timestamp()))
-                            
-                            # Build the insert query matching your exact table structure
-                            insert_query = """
-                                INSERT INTO customers 
-                                (CUSTOMERID, NAME, PHONE, EMAIL, ADDRESS, UNIT, CITY, STATE, ZIPCODE,
-                                 LATITUDE, LONGITUDE, HAS_LOCK_BOX, LOCK_BOX_CODE, HOW_HEARD, NOTE)
-                                VALUES (
-                                    '{}',
-                                    '{}',
-                                    '{}',
-                                    {},
-                                    '{}',
-                                    {},
-                                    '{}',
-                                    '{}',
-                                    '{}',
-                                    {},
-                                    {},
-                                    '{}',
-                                    {},
-                                    {},
-                                    {}
-                                )
-                            """.format(
-                                customer_id,
-                                name.replace("'", "''"),
-                                phone.replace("'", "''"),
-                                "'{}'".format(email.replace("'", "''")) if email else 'NULL',
-                                address.replace("'", "''"),
-                                "'{}'".format(unit.replace("'", "''")) if unit else 'NULL',
-                                city.replace("'", "''"),
-                                state,
-                                zipcode,
-                                latitude if latitude is not None else 'NULL',
-                                longitude if longitude is not None else 'NULL',
-                                has_lock_box,
-                                "'{}'".format(lock_box_code.replace("'", "''")) if lock_box_code else 'NULL',
-                                "'{}'".format(how_heard.replace("'", "''")) if how_heard else 'NULL',
-                                "'{}'".format(note.replace("'", "''")) if note else 'NULL'
-                            )
-                            session.sql(insert_query).collect()
-                            
-                            st.success("✅ Customer added successfully! Customer ID: {}".format(customer_id))
-                            # Clear form data after successful submission
-                            st.session_state.customer_form_data = {
-                                'name': '',
-                                'phone': '',
-                                'email': '',
-                                'address': '',
-                                'unit': '',
-                                'city': '',
-                                'state': 'MD',
-                                'zipcode': '',
-                                'latitude': 0.0,
-                                'longitude': 0.0,
-                                'has_lock_box': 'No',
-                                'lock_box_code': '',
-                                'how_heard': '',
-                                'note': ''
-                            }
-                    except Exception as e:
-                        st.error("Error adding customer: {}".format(str(e)))
- 
-####---------------------------------------------------------------####
-    # Unified Search Section
-    st.subheader("🔍 Search Customers")
-    search_term = st.text_input("", 
-                               placeholder="Search by name, phone, email, or address",
-                               key="unified_search")
-    
-    # Search across all relevant fields only if search term exists
-    if search_term:
-        customers = session.sql(f"""
-            SELECT * FROM customers 
-            WHERE NAME ILIKE '%{search_term}%' 
-               OR PHONE ILIKE '%{search_term}%'
-               OR EMAIL ILIKE '%{search_term}%'
-               OR ADDRESS ILIKE '%{search_term}%'
-            ORDER BY NAME
-        """).collect()
-        
-        # Only display if we found matches
-        if customers:
-            for customer in customers:
-                with st.expander(f"{customer['NAME']} - {customer['PHONE']}"):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.write(f"**Customer ID:** {customer['CUSTOMERID']}")
-                        st.write(f"**Email:** {customer['EMAIL'] or 'Not provided'}")
-                        st.write(f"**Address:** {customer['ADDRESS']}")
-                        
-                    with col2:
-                        st.write(f"**Lock Box:** {'Yes' if customer.get('HAS_LOCK_BOX', False) else 'No'}")
-                        if customer.get('HAS_LOCK_BOX', False):
-                            st.write(f"**Lock Box Code:** {customer.get('LOCK_BOX_CODE', 'Not provided')}")
-                        st.write(f"**Note:** {customer.get('NOTE', 'None')}")
-                    
-                    st.write(f"**Request:** {customer['REQUEST'] or 'No request'}")
-                    
-                    # Action buttons
-                    if st.button("Edit", key=f"edit_{customer['CUSTOMERID']}"):
-                        st.session_state['edit_customer'] = customer['CUSTOMERID']
-
-    # Handle customer editing
-    if 'edit_customer' in st.session_state:
-        edit_customer_id = st.session_state['edit_customer']
-        customer_to_edit = session.sql(f"""
-            SELECT * FROM customers 
-            WHERE CUSTOMERID = '{edit_customer_id}'
-        """).collect()[0]
-        
-        st.subheader("✏️ Edit Customer")
-        with st.form("edit_customer_form"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                name = st.text_input("Full Name*", value=customer_to_edit['NAME'])
-                phone = st.text_input("Phone*", value=customer_to_edit['PHONE'])
-                email = st.text_input("Email", value=customer_to_edit['EMAIL'] or "")
-                address = st.text_input("Address*", value=customer_to_edit['ADDRESS'])
-                
-            with col2:
-                # Parse unit from address if exists
-                unit = ""
-                if ', Unit ' in customer_to_edit['ADDRESS']:
-                    unit = customer_to_edit['ADDRESS'].split(', Unit ')[1].split(',')[0]
-                
-                # Lock Box section - now properly conditional
-                has_lock_box = st.radio(
-                    "Lock Box", 
-                    ["No", "Yes"], 
-                    horizontal=True,
-                    index=1 if customer_to_edit.get('HAS_LOCK_BOX', False) else 0,
-                    key="edit_lock_box"
-                )
-                
-                # Only show code input if Lock Box is Yes
-                lock_box_code = ""
-                if has_lock_box == "Yes":
-                    lock_box_code = st.text_input(
-                        "Lock Box Code*", 
-                        value=customer_to_edit.get('LOCK_BOX_CODE', ''),
-                        key="edit_lock_box_code"
-                    )
-                
-                note = st.text_input("Note", value=customer_to_edit.get('NOTE', ''))
-            
-            request = st.text_area("Customer Request", value=customer_to_edit['REQUEST'] or "")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.form_submit_button("💾 Save Changes"):
-                    if not all([name, phone, address]):
-                        st.error("Please fill in all required fields (*)")
-                    elif not re.match(r"^\d{3}-\d{3}-\d{4}$", phone):
-                        st.error("Invalid phone number format. Please use ###-###-####")
-                    elif has_lock_box == "Yes" and not lock_box_code:
-                        st.error("Please enter Lock Box Code when Lock Box is set to Yes")
-                    else:
-                        # Prepare full address
-                        full_address = f"{address}"
-                        if unit:
-                            full_address += f", Unit {unit}"
-                        if 'CITY' in customer_to_edit:
-                            full_address += f", {customer_to_edit['CITY']}, {customer_to_edit['STATE']} {customer_to_edit['ZIPCODE']}"
-                        
-                        session.sql(f"""
-                            UPDATE customers 
-                            SET NAME = '{name}',
-                                PHONE = '{phone}',
-                                EMAIL = {'NULL' if not email else f"'{email}'"},
-                                ADDRESS = '{full_address}',
-                                UNIT = {'NULL' if not unit else f"'{unit}'"},
-                                HAS_LOCK_BOX = {'TRUE' if has_lock_box == 'Yes' else 'FALSE'},
-                                LOCK_BOX_CODE = {'NULL' if not lock_box_code else f"'{lock_box_code}'"},
-                                NOTE = {'NULL' if not note else f"'{note}'"},
-                                REQUEST = {'NULL' if not request else f"'{request}'"}
-                            WHERE CUSTOMERID = '{edit_customer_id}'
-                        """).collect()
-                        st.success("Customer updated successfully!")
-                        del st.session_state['edit_customer']
-                        st.rerun()
-            
-            with col2:
-                if st.button("❌ Cancel"):
-                    del st.session_state['edit_customer']
-                    st.rerun()   
-      
-                    
-  
-
-#######################################################################
-#######################################################################
-#######################################################################
-#######################################################################
-######################################################################
-
-# Appointments
-def appointments():
-    st.subheader("📅 Appointment Scheduling")
-    session = get_session()
-
-    # Fetch customers and technicians
-    customers = session.sql("SELECT customerid, name, phone FROM customers ORDER BY name").collect()
-    customer_options = {row['CUSTOMERID']: f"{row['NAME']} ({row['PHONE']})" for row in customers}
-
-    technicians = session.sql("""
-        SELECT e.employeeid, e.ename 
-        FROM employees e
-        JOIN employee_roles er ON e.employeeid = er.employeeid
-        WHERE er.roleid = 'RL003'  -- Technician role
-        ORDER BY e.ename
-    """).collect()
-    tech_options = {row['EMPLOYEEID']: row['ENAME'] for row in technicians}
-
-    with st.form("appointment_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            customer_id = st.selectbox(
-                "Customer*",
-                options=customer_options.keys(),
-                format_func=lambda x: customer_options[x],
-                help="Select the customer for this appointment"
-            )
-            
-            # Get customer details for display
-            customer_info = next((c for c in customers if c['CUSTOMERID'] == customer_id), None)
-            if customer_info:
-                st.caption(f"Phone: {customer_info['PHONE']}")
-        
-        with col2:
-            technician_id = st.selectbox(
-                "Technician*",
-                options=tech_options.keys(),
-                format_func=lambda x: tech_options[x],
-                help="Select the technician for this appointment"
-            )
-        
-        # Date selection with restrictions (no weekends, no past dates)
-        today = datetime.now().date()
-        min_date = today
-        max_date = today + timedelta(days=60)  # 2 months in future
-        
-        appointment_date = st.date_input(
-            "Appointment Date*",
-            min_value=min_date,
-            max_value=max_date,
-            value=today,
-            format="MM/DD/YYYY",
-            help="Select a weekday (Monday-Friday)"
-        )
-        
-        # Check if date is weekend
-        if appointment_date.weekday() >= 5:  # 5=Saturday, 6=Sunday
-            st.warning("⚠️ We don't schedule appointments on weekends. Please select a weekday.")
-        
-        # Time range selection
-        st.subheader("Time Range")
-        cols = st.columns(2)
-        with cols[0]:
-            start_time = st.time_input(
-                "Start Time*",
-                value=time(9, 0),  # Default 9:00 AM
-                step=timedelta(minutes=30),
-                help="Appointment start time (business hours 8AM-5PM)"
-            )
-        with cols[1]:
-            end_time = st.time_input(
-                "End Time*",
-                value=time(10, 0),  # Default 10:00 AM
-                step=timedelta(minutes=30),
-                help="Appointment end time"
-            )
-        
-        # Validate time range
-        if start_time >= end_time:
-            st.error("End time must be after start time")
-        elif start_time < time(8, 0) or end_time > time(17, 0):
-            st.warning("⚠️ Our business hours are 8:00 AM to 5:00 PM")
-        
-        # Service type selection with clear placeholder
-        service_types = [
-            "",  # Empty first option for placeholder
-            "Estimate",
-            "Service",
-            "Installation"
-            
-           
-        ]
-        service_type = st.selectbox(
-            "Service Type*",
-            options=service_types,
-            index=0,  # Default to empty option
-            help="Select the type of service needed"
-        )
-        
-        # Show error if service type not selected
-        if service_type == "":
-            st.error("Please select a service type")
-        
-        # Priority selection
-        priority = st.radio(
-            "Priority",
-            options=["Normal", "Emergency"],
-            horizontal=True,
-            help="Emergency appointments may incur additional charges"
-        )
-
-        # Service type selection with clear placeholder
-        service_requested = [
-            "",  # Empty first option for placeholder
-            "No Cool",
-            "No Heat",
-            "No Airflow",
-            "Low Airflow",
-            "Freezing",
-            "Water Leaks",
-            "No Power"
-            
-           
-        ]
-
-
-
-        
-
-        # Service Request
-        notes = st.text_area(
-            "Service Request Note",
-            help="What Customer is asking for"
-        )
-        
-        # Notes field
-        notes = st.text_area(
-            "Notes/Details",
-            help="Any special instructions or details about the appointment"
-        )
-        # Enterance 
-        notes = st.text_area(
-            "Entrance",
-            help="Any special instructions or details about how to enter to the site"
-        )
-
-        
-        
-        # Check technician availability before submission
-        if st.form_submit_button("Schedule Appointment"):
-            # Validate inputs
-            if not customer_id or not technician_id or not appointment_date or service_type == "":
-                st.error("Please fill in all required fields (*)")
-            elif start_time >= end_time:
-                st.error("Invalid time range")
-            else:
-                try:
-                    # Combine date and time
-                    start_datetime = datetime.combine(appointment_date, start_time)
-                    end_datetime = datetime.combine(appointment_date, end_time)
-                    
-                    # Check for conflicts
-                    conflicts = session.sql(f"""
-                        SELECT COUNT(*) as conflict_count 
-                        FROM appointments
-                        WHERE technicianid = '{technician_id}'
-                        AND (
-                            (scheduled_time BETWEEN '{start_datetime}' AND '{end_datetime}')
-                            OR (end_time BETWEEN '{start_datetime}' AND '{end_datetime}')
-                            OR ('{start_datetime}' BETWEEN scheduled_time AND end_time)
-                        )
-                        AND status != 'cancelled'
-                    """).collect()[0]['CONFLICT_COUNT']
-                    
-                    if conflicts > 0:
-                        st.error(f"❌ Technician is not available during this time slot. Please choose a different time or technician.")
-                    else:
-                        # Generate appointment ID
-                        appointment_id = f"APT{datetime.now().timestamp()}"
-                        
-                        # Insert into database
-                        session.sql(f"""
-                            INSERT INTO appointments 
-                            (appointmentid, customerid, technicianid, 
-                             scheduled_time, end_time, service_type, 
-                             priority, notes, status)
-                            VALUES (
-                                '{appointment_id}',
-                                '{customer_id}',
-                                '{technician_id}',
-                                '{start_datetime}',
-                                '{end_datetime}',
-                                '{service_type}',
-                                '{priority}',
-                                '{notes}',
-                                'scheduled'
-                            )
-                        """).collect()
-                        
-                        st.success("✅ Appointment scheduled successfully!")
-                        
-                        # Show appointment details
-                        st.subheader("Appointment Confirmation")
-                        cols = st.columns(2)
-                        with cols[0]:
-                            st.write(f"**Customer:** {customer_options[customer_id]}")
-                            st.write(f"**Technician:** {tech_options[technician_id]}")
-                            st.write(f"**Date:** {appointment_date.strftime('%A, %B %d, %Y')}")
-                        with cols[1]:
-                            st.write(f"**Time:** {start_time.strftime('%I:%M %p')} - {end_time.strftime('%I:%M %p')}")
-                            st.write(f"**Service:** {service_type}")
-                            st.write(f"**Priority:** {priority}")
-                        
-                        # Add to calendar button
-                        st.markdown("""
-                        <a href="https://calendar.google.com/calendar/render?action=TEMPLATE&text=HVAC+Appointment&dates={start_fmt}/{end_fmt}&details=Customer:{customer}%0ATechnician:{tech}%0AService:{service}%0ANotes:{notes}&location={address}" 
-                        target="_blank" class="btn btn-outline-primary">Add to Google Calendar</a>
-                        """.format(
-                            start_fmt=start_datetime.strftime('%Y%m%dT%H%M%S'),
-                            end_fmt=end_datetime.strftime('%Y%m%dT%H%M%S'),
-                            customer=customer_options[customer_id].replace(' ', '+'),
-                            tech=tech_options[technician_id].replace(' ', '+'),
-                            service=service_type.replace(' ', '+'),
-                            notes=notes.replace(' ', '+') if notes else '',
-                            address=customer_info['ADDRESS'].replace(' ', '+') if customer_info and 'ADDRESS' in customer_info else ''
-                        ), unsafe_allow_html=True)
-                        
-                except Exception as e:
-                    st.error(f"Error scheduling appointment: {str(e)}")
-
-#######################################################################
-#######################################################################
 #######################################################################
 #######################################################################
 # Quotes/ Invoices
@@ -2216,70 +2309,22 @@ Potomac HVAC LLC
 
 # Invoices
 def invoices():
-    st.subheader("🧾 Invoices")
+    st.subheader("🧾 coming soon")
     session = get_session()
 
-    # Fetch jobs
-    jobs = session.sql("SELECT jobid, quoteid FROM jobs").collect()
-    job_options = {row['JOBID']: row['QUOTEID'] for row in jobs}
-
-    with st.form("invoice_form"):
-        job_id = st.selectbox(
-            "Select Job",
-            options=job_options.keys(),
-            format_func=lambda x: job_options[x]
-        )
-        total_amount = st.number_input("Total Amount", min_value=0.0, step=0.01)
-        description = st.text_area("Invoice Description")
-
-        if st.form_submit_button("Create Invoice"):
-            invoice_id = f"INV{datetime.now().timestamp()}"
-            session.sql(f"""
-                INSERT INTO invoices 
-                (invoiceid, jobid, total_amount, description)
-                VALUES (
-                    '{invoice_id}',
-                    '{job_id}',
-                    {total_amount},
-                    '{description}'
-                )
-            """).collect()
-            st.success("Invoice created successfully!")
 
 #######################################################################
 # Payments
 def payments():
-    st.subheader("💳 Payments")
+    st.subheader("💳 Payments , coming soon")
     session = get_session()
 
-    # Fetch invoices
-    invoices = session.sql("SELECT invoiceid, jobid FROM invoices").collect()
-    invoice_options = {row['INVOICEID']: row['JOBID'] for row in invoices}
-
-    with st.form("payment_form"):
-        invoice_id = st.selectbox(
-            "Select Invoice",
-            options=invoice_options.keys(),
-            format_func=lambda x: invoice_options[x]
-        )
-        amount = st.number_input("Amount", min_value=0.0, step=0.01)
-        payment_method = st.selectbox("Payment Method", ["cash", "check", "credit card"])
-
-        if st.form_submit_button("Process Payment"):
-            payment_id = f"PAY{datetime.now().timestamp()}"
-            session.sql(f"""
-                INSERT INTO payments 
-                (paymentid, invoiceid, amount, payment_method)
-                VALUES (
-                    '{payment_id}',
-                    '{invoice_id}',
-                    {amount},
-                    '{payment_method}'
-                )
-            """).collect()
-            st.success("Payment processed successfully!")
 #######################################################################
 
+# Reports
+def reports():
+    st.subheader("📈 Reports coming soon")
+    session = get_session()
 
 #######################################################################
 # Analytics
@@ -2290,103 +2335,341 @@ def analytics():
 #######################################################################
 
 # Admin Tab: Manage All Tables
+
 def admin_tables():
     st.subheader("🛠 Admin Tables")
     session = get_session()
     
-    # List of all tables
+    # List of all tables including the schedule table
     tables = [
         "employees", "customers", "appointments", "quotes", "jobs", 
         "invoices", "roles", "employee_roles", "payment_methods", 
-        "payments", "allservices", "equipment", "materials"
+        "payments", "allservices", "equipment", "materials", "employee_schedules"
     ]
     
     # Select table to manage
     selected_table = st.selectbox("Select Table", tables)
     
-    # Fetch data from selected table
-    table_data = session.table(selected_table).collect()
-    if table_data:
-        st.write(f"### {selected_table.capitalize()} Table")
-        st.dataframe(table_data)
-    
-    # Add new record
-    with st.expander(f"Add New Record to {selected_table}"):
-        with st.form(f"add_{selected_table}_form"):
-            # Dynamically create input fields based on table columns
-            columns = session.table(selected_table).columns
-            input_values = {}
-            for col in columns:
-                if col.lower().endswith("id"):  # Skip ID fields (auto-generated)
-                    continue
-                input_values[col] = st.text_input(f"{col}")
+    # Special handling for employee_schedules table
+    if selected_table == "employee_schedules":
+        st.subheader("📅 Employee Schedule Management")
+        
+        # Date range selection - default to current week
+        today = datetime.now().date()
+        start_of_week = today - timedelta(days=today.weekday())
+        end_of_week = start_of_week + timedelta(days=6)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input("Week Starting", value=start_of_week)
+        with col2:
+            end_date = st.date_input("Week Ending", value=end_of_week)
+        
+        # Get all employees for dropdown
+        employees = session.sql("SELECT employeeid, ename FROM employees ORDER BY ename").collect()
+        employee_options = {e['EMPLOYEEID']: e['ENAME'] for e in employees}
+        
+        # Get all schedules for the selected week
+        schedules = session.sql(f"""
+            SELECT s.*, e.ename 
+            FROM employee_schedules s
+            JOIN employees e ON s.employeeid = e.employeeid
+            WHERE s.schedule_date BETWEEN '{start_date}' AND '{end_date}'
+            ORDER BY s.schedule_date, s.start_time
+        """).collect()
+        
+        # Create calendar view - days as columns, hours as rows
+        st.subheader(f"📅 Weekly Schedule: {start_date.strftime('%m/%d')} - {end_date.strftime('%m/%d')}")
+        
+        # Define time slots (8AM to 6PM in 2-hour increments)
+        time_slots = [
+            ("8:00-10:00", time(8, 0), time(10, 0)),
+            ("10:00-12:00", time(10, 0), time(12, 0)),
+            ("12:00-14:00", time(12, 0), time(14, 0)),
+            ("14:00-16:00", time(14, 0), time(16, 0)),
+            ("16:00-18:00", time(16, 0), time(18, 0))
+        ]
+        
+        # Get all days in the week
+        days = [(start_date + timedelta(days=i)).strftime("%a %m/%d") for i in range(7)]
+        day_dates = [start_date + timedelta(days=i) for i in range(7)]
+        
+        # Create custom CSS for employee boxes
+        st.markdown("""
+        <style>
+            .employee-box {
+                display: inline-block;
+                background-color: #e6f7ff;
+                border-radius: 4px;
+                padding: 2px 6px;
+                margin: 2px;
+                font-size: 12px;
+                border: 1px solid #b3e0ff;
+            }
+            .schedule-table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            .schedule-table th, .schedule-table td {
+                border: 1px solid #ddd;
+                padding: 8px;
+                text-align: center;
+            }
+            .schedule-table th {
+                background-color: #f2f2f2;
+                font-weight: bold;
+            }
+            .time-col {
+                background-color: #f9f9f9;
+                font-weight: bold;
+            }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Create HTML table
+        table_html = """
+        <table class="schedule-table">
+            <tr>
+                <th>Time Slot</th>
+        """
+        
+        # Add day headers
+        for day in days:
+            table_html += f"<th>{day}</th>"
+        table_html += "</tr>"
+        
+        # Add time slots and employee boxes
+        for slot_name, slot_start, slot_end in time_slots:
+            table_html += f"<tr><td class='time-col'>{slot_name}</td>"
             
-            if st.form_submit_button("Add Record"):
-                try:
-                    # Generate ID if not provided
-                    if "id" in [c.lower() for c in columns]:
-                        input_values[columns[0]] = f"{selected_table.upper()}_{datetime.now().timestamp()}"
-                    
-                    # Build SQL query
-                    columns_str = ", ".join([f'"{col}"' for col in input_values.keys()])
-                    values_str = ", ".join([f"'{input_values[col]}'" for col in input_values.keys()])
-                    session.sql(f"""
-                        INSERT INTO {selected_table} 
-                        ({columns_str})
-                        VALUES ({values_str})
-                    """).collect()
-                    st.success("Record added successfully!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error adding record: {str(e)}")
-    
-    # Edit/Delete record
-    with st.expander(f"Edit/Delete Record in {selected_table}"):
-        if table_data:
-            selected_record = st.selectbox(
-                f"Select Record to Edit/Delete",
-                options=[row[columns[0]] for row in table_data]
-            )
-            
-            if selected_record:
-                record_data = [row for row in table_data if row[columns[0]] == selected_record][0]
+            for day_date in day_dates:
+                # Find schedules for this day and time slot
+                day_schedules = []
+                for s in schedules:
+                    if s['SCHEDULE_DATE'] == day_date:
+                        s_start = s['START_TIME']
+                        s_end = s['END_TIME']
+                        # Check if schedule overlaps with time slot
+                        if (s_start < slot_end) and (s_end > slot_start):
+                            day_schedules.append(s['ENAME'])
                 
-                with st.form(f"edit_{selected_table}_form"):
-                    # Dynamically create input fields for editing
-                    edit_values = {}
-                    for col in columns:
-                        if col.lower().endswith("id"):  # Skip ID fields (read-only)
-                            st.text_input(f"{col} (Read-Only)", value=record_data[col], disabled=True)
+                # Create cell with employee boxes
+                table_html += "<td>"
+                for name in day_schedules:
+                    table_html += f"<div class='employee-box'>{name}</div>"
+                table_html += "</td>"
+            
+            table_html += "</tr>"
+        
+        table_html += "</table>"
+        
+        # Display the table
+        st.markdown(table_html, unsafe_allow_html=True)
+        
+        # Schedule management form
+        with st.expander("✏️ Add New Schedule"):
+            with st.form("schedule_form"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    employee = st.selectbox(
+                        "Employee",
+                        options=list(employee_options.keys()),
+                        format_func=lambda x: employee_options[x]
+                    )
+                    schedule_date = st.date_input(
+                        "Date",
+                        min_value=start_date,
+                        max_value=end_date
+                    )
+                with col2:
+                    start_time = st.time_input("Start Time", value=time(8, 0))
+                    end_time = st.time_input("End Time", value=time(17, 0))
+                
+                notes = st.text_input("Notes (optional)")
+                
+                submitted = st.form_submit_button("Save Schedule")
+                if submitted:
+                    # Validate time range
+                    if start_time >= end_time:
+                        st.error("End time must be after start time!")
+                    else:
+                        # Check for existing schedules that conflict
+                        existing = session.sql(f"""
+                            SELECT * FROM employee_schedules
+                            WHERE employeeid = '{employee}'
+                            AND schedule_date = '{schedule_date}'
+                            AND (
+                                (start_time < '{end_time}' AND end_time > '{start_time}')
+                            )
+                        """).collect()
+                        
+                        if existing:
+                            st.error("This employee already has a schedule during this time period!")
                         else:
-                            edit_values[col] = st.text_input(f"{col}", value=record_data[col])
+                            try:
+                                # Check for duplicate schedule
+                                duplicate = session.sql(f"""
+                                    SELECT * FROM employee_schedules
+                                    WHERE employeeid = '{employee}'
+                                    AND schedule_date = '{schedule_date}'
+                                    AND start_time = '{start_time}'
+                                    AND end_time = '{end_time}'
+                                """).collect()
+                                
+                                if duplicate:
+                                    st.error("This exact schedule already exists for this employee!")
+                                else:
+                                    schedule_id = f"SCH{datetime.now().timestamp()}"
+                                    session.sql(f"""
+                                        INSERT INTO employee_schedules (
+                                            scheduleid, employeeid, schedule_date, 
+                                            start_time, end_time, notes
+                                        ) VALUES (
+                                            '{schedule_id}',
+                                            '{employee}',
+                                            '{schedule_date}',
+                                            '{start_time}',
+                                            '{end_time}',
+                                            '{notes.replace("'", "''")}'
+                                        )
+                                    """).collect()
+                                    st.success("Schedule added successfully!")
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"Error saving schedule: {str(e)}")
+        
+        # Delete schedule option
+        with st.expander("🗑️ Delete Schedules"):
+            if schedules:
+                # Group schedules by employee and date for better organization
+                schedule_groups = {}
+                for s in schedules:
+                    key = f"{s['ENAME']} - {s['SCHEDULE_DATE']}"
+                    if key not in schedule_groups:
+                        schedule_groups[key] = []
+                    schedule_groups[key].append(s)
+                
+                # Create select box with grouped options
+                selected_group = st.selectbox(
+                    "Select employee and date",
+                    options=list(schedule_groups.keys())
+                )
+                
+                # Show schedules for selected employee/date
+                if selected_group:
+                    group_schedules = schedule_groups[selected_group]
+                    selected_schedule = st.selectbox(
+                        "Select schedule to delete",
+                        options=[f"{s['START_TIME']} to {s['END_TIME']} ({s['NOTES'] or 'no notes'})" 
+                                for s in group_schedules],
+                        key="delete_schedule_select"
+                    )
                     
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.form_submit_button("Update Record"):
-                            try:
-                                set_clause = ", ".join([f'"{col}" = \'{edit_values[col]}\'' for col in edit_values.keys()])
-                                session.sql(f"""
-                                    UPDATE {selected_table} 
-                                    SET {set_clause}
-                                    WHERE "{columns[0]}" = '{selected_record}'
-                                """).collect()
-                                st.success("Record updated successfully!")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Error updating record: {str(e)}")
-                    with col2:
-                        if st.form_submit_button("Delete Record"):
-                            try:
-                                session.sql(f"""
-                                    DELETE FROM {selected_table} 
-                                    WHERE "{columns[0]}" = '{selected_record}'
-                                """).collect()
-                                st.success("Record deleted successfully!")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Error deleting record: {str(e)}")
+                    if st.button("Delete Selected Schedule"):
+                        schedule_id = group_schedules[
+                            [f"{s['START_TIME']} to {s['END_TIME']} ({s['NOTES'] or 'no notes'})" 
+                             for s in group_schedules].index(selected_schedule)
+                        ]['SCHEDULEID']
+                        session.sql(f"""
+                            DELETE FROM employee_schedules
+                            WHERE scheduleid = '{schedule_id}'
+                        """).collect()
+                        st.success("Schedule deleted!")
+                        st.rerun()
+            else:
+                st.info("No schedules to delete for selected week")
+    
+    else:
+        # Standard table management for all other tables
+        st.subheader(f"Manage {selected_table.capitalize()}")
+        
+        # Fetch data from selected table
+        table_data = session.table(selected_table).collect()
+        if table_data:
+            st.dataframe(table_data)
+        
+        # Add new record
+        with st.expander("➕ Add New Record"):
+            with st.form(f"add_{selected_table}_form"):
+                # Dynamically create input fields based on table columns
+                columns = session.table(selected_table).columns
+                input_values = {}
+                for col in columns:
+                    if col.lower().endswith("id"):  # Skip ID fields (auto-generated)
+                        continue
+                    input_values[col] = st.text_input(f"{col}")
+                
+                if st.form_submit_button("Add Record"):
+                    try:
+                        # Generate ID if not provided
+                        if "id" in [c.lower() for c in columns]:
+                            input_values[columns[0]] = f"{selected_table.upper()}_{datetime.now().timestamp()}"
+                        
+                        # Build SQL query
+                        columns_str = ", ".join([f'"{col}"' for col in input_values.keys()])
+                        values_str = ", ".join([f"'{input_values[col]}'" for col in input_values.keys()])
+                        session.sql(f"""
+                            INSERT INTO {selected_table} 
+                            ({columns_str})
+                            VALUES ({values_str})
+                        """).collect()
+                        st.success("Record added successfully!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error adding record: {str(e)}")
+        
+        # Edit/Delete record
+        with st.expander("✏️ Edit/Delete Record"):
+            if table_data:
+                selected_record = st.selectbox(
+                    f"Select Record to Edit/Delete",
+                    options=[row[columns[0]] for row in table_data]
+                )
+                
+                if selected_record:
+                    record_data = [row for row in table_data if row[columns[0]] == selected_record][0]
+                    
+                    with st.form(f"edit_{selected_table}_form"):
+                        # Dynamically create input fields for editing
+                        edit_values = {}
+                        for col in columns:
+                            if col.lower().endswith("id"):  # Skip ID fields (read-only)
+                                st.text_input(f"{col} (Read-Only)", value=record_data[col], disabled=True)
+                            else:
+                                edit_values[col] = st.text_input(f"{col}", value=record_data[col])
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.form_submit_button("Update Record"):
+                                try:
+                                    set_clause = ", ".join([f'"{col}" = \'{edit_values[col]}\'' for col in edit_values.keys()])
+                                    session.sql(f"""
+                                        UPDATE {selected_table} 
+                                        SET {set_clause}
+                                        WHERE "{columns[0]}" = '{selected_record}'
+                                    """).collect()
+                                    st.success("Record updated successfully!")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error updating record: {str(e)}")
+                        with col2:
+                            if st.form_submit_button("Delete Record"):
+                                try:
+                                    session.sql(f"""
+                                        DELETE FROM {selected_table} 
+                                        WHERE "{columns[0]}" = '{selected_record}'
+                                    """).collect()
+                                    st.success("Record deleted successfully!")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error deleting record: {str(e)}")
+ 
+                                     
+  
 #######################################################################
 # Main app function
+   
+
 def main_app():
     st.sidebar.title(f"Welcome {st.session_state.user_name}")
 
@@ -2399,8 +2682,8 @@ def main_app():
     available_tabs.add("profile")
 
     # Define tab order
-    tab_order = ['Home', 'profile', 'customers', 'appointments', 'quotes', 'jobs', 
-                 'invoices', 'payments', 'reports', 'analytics', 'admin_tables', 'equipment']
+    tab_order = ['Home', 'profile', 'customers', 'appointments', 'quotes', 
+                'invoices', 'payments', 'reports', 'analytics', 'admin_tables', 'equipment']
     
     available_tabs = [tab for tab in tab_order if tab in available_tabs]
 
@@ -2419,8 +2702,6 @@ def main_app():
         appointments()
     elif selected_tab == 'quotes':
         quotes()
-    elif selected_tab == 'jobs':
-        jobs()
     elif selected_tab == 'invoices':
         invoices()
     elif selected_tab == 'payments':
@@ -2430,8 +2711,7 @@ def main_app():
     elif selected_tab == 'analytics':
         analytics()
     elif selected_tab == 'admin_tables':
-        admin_tables()
-    
+        admin_tables()  # Now this is defined before being called
 
     # Logout button
     if st.sidebar.button("Logout"):
@@ -2446,4 +2726,4 @@ if __name__ == '__main__':
     elif not st.session_state.get('logged_in'):
         login_page()
     else:
-        main_app()
+        main_app() 
