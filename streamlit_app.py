@@ -10,6 +10,13 @@ from PIL import Image, ImageOps
 import io
 import base64
 import pandas as pd
+
+cnx=st.connection("snowflake")
+session = cnx.session()
+from snowflake.snowpark import Session
+
+
+
 ##########################################################################################
 ##########################################################################################
 ##########################################################################################
