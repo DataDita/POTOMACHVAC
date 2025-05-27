@@ -1,3 +1,12 @@
+# Import python packages
+import streamlit as st
+from snowflake.snowpark.context import get_active_session
+
+# Get the current credentials
+session = get_active_session()
+
+
+
 import streamlit.components.v1 as components
 import streamlit as st
 import snowflake.snowpark as sp
@@ -11,10 +20,25 @@ import io
 import base64
 import pandas as pd
 
+
+from snowflake.snowpark.functions import col
 cnx=st.connection("snowflake")
 session = cnx.session()
 from snowflake.snowpark import Session
-
+from datetime import datetime, timedelta
+import re
+import uuid
+import hashlib
+import base64
+from PIL import Image
+import io
+# Add this helper function with your imports
+from PIL import Image, ImageOps
+import io
+# Import python packages
+import streamlit as st
+from snowflake.snowpark.functions import col
+import requests
 
 
 ##########################################################################################
@@ -169,42 +193,41 @@ def reset_password(token):
                 st.error(f"Error resetting password: {str(e)}")
         else:
             st.error("Passwords do not match")
-##########################################################################################
-##########################################################################################
-##########################################################################################
-##########################################################################################
-
-# Home
+#######################################################################
+######################################################################
+#############HOME#####################################################
 
 def Home():
+    # Establish connection to Snowflake database using existing session
     session = get_session()
     
-    # Initialize all variables
-    selected_date = datetime.now().date()
-    manual_time = False
-    manual_clock_in = None
-    manual_clock_out = None
-    manual_break_start = None
-    manual_break_end = None
-    is_clocked_in = False
-    is_on_break = False
-    time_entry = []
-    break_entry = []
+    # Initialize variables for time tracking with default values
+    selected_date = datetime.now().date()  # Set default date to today
+    manual_time = False  # Flag for manual time entry mode
+    manual_clock_in = None  # Stores manually entered clock-in time
+    manual_clock_out = None  # Stores manually entered clock-out time
+    manual_break_start = None  # Stores manually entered break start time
+    manual_break_end = None  # Stores manually entered break end time
+    is_clocked_in = False  # Tracks if employee is currently clocked in
+    is_on_break = False  # Tracks if employee is currently on break
+    time_entry = []  # Stores time clock entries from database
+    break_entry = []  # Stores break entries from database
 
     # --- UI Layout ---
+    # Create main page title
     st.title("Home")
     
-    # Header with profile
-    col1, col2 = st.columns([4, 1])
-    with col1:
+    # Create header section with profile information
+    col1, col2 = st.columns([4, 1])  # Split layout into two columns (4:1 ratio)
+    with col1:  # Left column for user info
+        # Display welcome message with user's name
         st.subheader(f"Welcome, {st.session_state.user_name}!")
+        # Show user's roles in smaller text
         st.caption(f"Role: {', '.join(st.session_state.roles)}")
 
-    
-    
-    with col2:
-        # profile picture display
-        try:
+    with col2:  # Right column for profile picture
+        try:  # Handle potential errors in profile picture loading
+            # Query database for most recent profile picture
             pic_data = session.sql(f"""
                 SELECT PICTURE_DATA_TEXT FROM EMPLOYEE_PICTURES
                 WHERE EMPLOYEEID = '{st.session_state.user_id}'
@@ -212,51 +235,66 @@ def Home():
             """).collect()
             
             if pic_data and pic_data[0]['PICTURE_DATA_TEXT']:
+                # Decode base64 image data and display
                 img = Image.open(io.BytesIO(base64.b64decode(pic_data[0]['PICTURE_DATA_TEXT'])))
-                st.image(img, width=100)
+                st.image(img, width=100)  # Show image at 100px width
             else:
+                # Display placeholder gray image if no picture exists
                 st.image(Image.new('RGB', (100,100), color='gray'), width=100)
-        except Exception as e:
+        except Exception as e:  # Catch and display any image loading errors
             st.error(f"Couldn't load profile picture: {str(e)}")
 
-  
-    
     # --- Time Tracking Section ---
+    # Create section header for time tracking
     st.subheader("Time Tracking")
+    # Add toggle switch for manual time entry mode
     manual_time = st.toggle("Manual Time Entry", help="Enable to enter times manually")
     
-    # Create time options from 7 AM to 10 PM in 12-hour format
-    time_options = []
-    for hour in range(7, 23):  # 7 AM to 10 PM (22:00)
+    # Generate time options for manual entry dropdowns
+    time_options = []  # Store tuples of (display time, time object)
+    for hour in range(7, 23):  # Hours from 7 AM to 10 PM (23 in 24h format)
         for minute in [0, 15, 30, 45]:  # 15-minute intervals
-            time_obj = time(hour, minute)
+            time_obj = time(hour, minute)  # Create time object
+            # Format as 12-hour time with AM/PM and add to options
             time_options.append((time_obj.strftime("%I:%M %p"), time_obj))
     
-    if manual_time:
-        with st.form("manual_time_form"):
+    if manual_time:  # Manual time entry mode
+        with st.form("manual_time_form"):  # Create form container
             st.warning("Manual Entry Mode - For correcting missed punches")
             
+            # Date selection for manual entry
+            selected_date = st.date_input(
+                "Entry Date",
+                value=datetime.now().date(),  # Default to today
+                min_value=datetime.now().date() - timedelta(days=30),  # Allow past 30 days
+                max_value=datetime.now().date()  # Don't allow future dates
+            )
+            
+            # Create two columns for clock in/out times
             cols = st.columns(2)
-            with cols[0]:
+            with cols[0]:  # Clock-in column
                 selected_clock_in = st.selectbox(
                     "Clock In Time",
-                    options=[t[0] for t in time_options],
-                    index=0,
+                    options=[t[0] for t in time_options],  # Display times
+                    index=0,  # Default to first option
                     key="clock_in_select"
                 )
+                # Get corresponding time object from selection
                 manual_clock_in = next(t[1] for t in time_options if t[0] == selected_clock_in)
             
-            with cols[1]:
+            with cols[1]:  # Clock-out column
                 selected_clock_out = st.selectbox(
                     "Clock Out Time",
                     options=["Not clocked out yet"] + [t[0] for t in time_options],
                     index=0,
                     key="clock_out_select"
                 )
+                # Handle "not clocked out" selection
                 manual_clock_out = next((t[1] for t in time_options if t[0] == selected_clock_out), None)
             
+            # Create two columns for break times
             cols = st.columns(2)
-            with cols[0]:
+            with cols[0]:  # Break start column
                 selected_break_start = st.selectbox(
                     "Break Start",
                     options=["No break"] + [t[0] for t in time_options],
@@ -265,7 +303,7 @@ def Home():
                 )
                 manual_break_start = next((t[1] for t in time_options if t[0] == selected_break_start), None)
             
-            with cols[1]:
+            with cols[1]:  # Break end column
                 selected_break_end = st.selectbox(
                     "Break End",
                     options=["Break not ended"] + [t[0] for t in time_options],
@@ -274,16 +312,17 @@ def Home():
                 )
                 manual_break_end = next((t[1] for t in time_options if t[0] == selected_break_end), None)
             
+            # Form submission handler
             if st.form_submit_button("Save Manual Entry"):
-                if not manual_clock_in:
+                if not manual_clock_in:  # Validate required field
                     st.error("Clock in time is required")
                 else:
                     try:
-                        # Convert to datetime objects
+                        # Convert times to datetime objects with selected date
                         clock_in_dt = datetime.combine(selected_date, manual_clock_in)
                         clock_out_dt = datetime.combine(selected_date, manual_clock_out) if manual_clock_out else None
                         
-                        # Check for existing entry
+                        # Check for existing time entry
                         existing = session.sql(f"""
                             SELECT ENTRYID FROM employee_time_entries
                             WHERE EMPLOYEEID = '{st.session_state.user_id}'
@@ -291,17 +330,15 @@ def Home():
                             LIMIT 1
                         """).collect()
                         
-                        if existing:
-                            # Update existing entry
+                        if existing:  # Update existing entry
                             session.sql(f"""
                                 UPDATE employee_time_entries
                                 SET CLOCK_IN = '{clock_in_dt}',
                                     CLOCK_OUT = {'NULL' if clock_out_dt is None else f"'{clock_out_dt}'"}
                                 WHERE ENTRYID = '{existing[0]['ENTRYID']}'
                             """).collect()
-                        else:
-                            # Create new entry
-                            entry_id = f"ENTRY{datetime.now().timestamp()}"
+                        else:  # Create new entry
+                            entry_id = f"ENTRY{datetime.now().timestamp()}"  # Generate unique ID
                             session.sql(f"""
                                 INSERT INTO employee_time_entries
                                 (ENTRYID, EMPLOYEEID, CLOCK_IN, CLOCK_OUT, ENTRY_DATE)
@@ -314,15 +351,50 @@ def Home():
                                 )
                             """).collect()
                         
+                        # Handle break entries if provided
+                        if manual_break_start and manual_break_end:
+                            # Convert break times to datetime objects
+                            break_start_dt = datetime.combine(selected_date, manual_break_start)
+                            break_end_dt = datetime.combine(selected_date, manual_break_end)
+                            
+                            # Check for existing break entry
+                            existing_break = session.sql(f"""
+                                SELECT BREAKID FROM employee_break_entries
+                                WHERE EMPLOYEEID = '{st.session_state.user_id}'
+                                AND ENTRY_DATE = '{selected_date}'
+                                LIMIT 1
+                            """).collect()
+                            
+                            if existing_break:  # Update existing break
+                                session.sql(f"""
+                                    UPDATE employee_break_entries
+                                    SET BREAK_START = '{break_start_dt}',
+                                        BREAK_END = '{break_end_dt}'
+                                    WHERE BREAKID = '{existing_break[0]['BREAKID']}'
+                                """).collect()
+                            else:  # Create new break entry
+                                break_id = f"BREAK{datetime.now().timestamp()}"
+                                session.sql(f"""
+                                    INSERT INTO employee_break_entries
+                                    (BREAKID, EMPLOYEEID, BREAK_START, BREAK_END, ENTRY_DATE)
+                                    VALUES (
+                                        '{break_id}',
+                                        '{st.session_state.user_id}',
+                                        '{break_start_dt}',
+                                        '{break_end_dt}',
+                                        '{selected_date}'
+                                    )
+                                """).collect()
+                        
                         st.success("Time entry saved successfully!")
-                        st.rerun()
-                    except Exception as e:
+                        st.rerun()  # Refresh page to show changes
+                    except Exception as e:  # Handle database errors
                         st.error(f"Error saving time entry: {str(e)}")
     
-
-    
-    else:  # Automatic time tracking
-        # Get current status
+    else:  # Automatic time tracking mode
+        # Set date to today for automatic tracking
+        selected_date = datetime.now().date()
+        # Get current time entries from database
         time_entry = session.sql(f"""
             SELECT * FROM employee_time_entries
             WHERE EMPLOYEEID = '{st.session_state.user_id}'
@@ -331,6 +403,7 @@ def Home():
             LIMIT 1
         """).collect()
         
+        # Get current break entries from database
         break_entry = session.sql(f"""
             SELECT * FROM employee_break_entries
             WHERE EMPLOYEEID = '{st.session_state.user_id}'
@@ -339,14 +412,16 @@ def Home():
             LIMIT 1
         """).collect()
         
+        # Determine current clock status
         is_clocked_in = len(time_entry) > 0 and time_entry[0]['CLOCK_OUT'] is None
+        # Determine current break status
         is_on_break = len(break_entry) > 0 and break_entry[0]['BREAK_END'] is None
         
-        # Time tracking buttons
-        cols = st.columns(2)
-        with cols[0]:
-            if st.button("🟢 Clock In", disabled=is_clocked_in,
-                        ):
+        # Create time tracking buttons
+        cols = st.columns(2)  # Split into two columns
+        with cols[0]:  # Clock In button
+            if st.button("🟢 Clock In", disabled=is_clocked_in):
+                # Insert new time entry with current timestamp
                 session.sql(f"""
                     INSERT INTO employee_time_entries
                     (ENTRYID, EMPLOYEEID, CLOCK_IN, ENTRY_DATE)
@@ -357,10 +432,11 @@ def Home():
                         '{selected_date}'
                     )
                 """).collect()
-                st.rerun()
+                st.rerun()  # Refresh to update status
         
-        with cols[1]:
+        with cols[1]:  # Clock Out button
             if st.button("🔴 Clock Out", disabled=not is_clocked_in or is_on_break):
+                # Update most recent entry with clock-out time
                 session.sql(f"""
                     UPDATE employee_time_entries
                     SET CLOCK_OUT = CURRENT_TIMESTAMP()
@@ -372,8 +448,9 @@ def Home():
         
         # Break management buttons
         cols = st.columns(2)
-        with cols[0]:
+        with cols[0]:  # Start Break button
             if st.button("🟡 Start Break", disabled=not is_clocked_in or is_on_break):
+                # Insert new break entry with start time
                 session.sql(f"""
                     INSERT INTO employee_break_entries
                     (BREAKID, EMPLOYEEID, BREAK_START, ENTRY_DATE)
@@ -386,8 +463,9 @@ def Home():
                 """).collect()
                 st.rerun()
         
-        with cols[1]:
+        with cols[1]:  # End Break button
             if st.button("🟢 End Break", disabled=not is_on_break):
+                # Update most recent break with end time
                 session.sql(f"""
                     UPDATE employee_break_entries
                     SET BREAK_END = CURRENT_TIMESTAMP()
@@ -397,10 +475,7 @@ def Home():
                 """).collect()
                 st.rerun()
 
-
-   
-    
-    # Get latest status after potential updates
+    # Refresh time data after potential updates
     time_entry = session.sql(f"""
         SELECT * FROM employee_time_entries
         WHERE EMPLOYEEID = '{st.session_state.user_id}'
@@ -409,6 +484,7 @@ def Home():
         LIMIT 1
     """).collect()
     
+    # Refresh break data after potential updates
     break_entry = session.sql(f"""
         SELECT * FROM employee_break_entries
         WHERE EMPLOYEEID = '{st.session_state.user_id}'
@@ -417,35 +493,30 @@ def Home():
         LIMIT 1
     """).collect()
     
+    # Create two columns for status displays
     cols = st.columns(2)
-    with cols[0]:
-        # Clock status
+    with cols[0]:  # Left status column
+        # Clock status display
         if time_entry:
-            if time_entry[0]['CLOCK_OUT'] is None:
+            if time_entry[0]['CLOCK_OUT'] is None:  # Currently clocked in
                 st.write(f"**Clocked In:**  {time_entry[0]['CLOCK_IN'].strftime('%I:%M %p')}")
-            else:
+            else:  # Clocked out
                 st.info("🔴 Clocked Out")
                 st.write(f"**Worked:** {time_entry[0]['CLOCK_IN'].strftime('%I:%M %p')} to {time_entry[0]['CLOCK_OUT'].strftime('%I:%M %p')}")
-       
 
-
-        # Break status - only show if clocked in
-        if time_entry and time_entry[0]['CLOCK_OUT'] is None:  # Only show break status if clocked in
+        # Break status display (only shown if clocked in)
+        if time_entry and time_entry[0]['CLOCK_OUT'] is None:
             if break_entry:
-                if break_entry[0]['BREAK_END'] is None:
+                if break_entry[0]['BREAK_END'] is None:  # Currently on break
                     st.error("🟡 Currently On Break")
                     st.write(f"**Since:** {break_entry[0]['BREAK_START'].strftime('%I:%M %p')}")
-                else:
+                else:  # Break completed
                     st.write(f"**Break:** {break_entry[0]['BREAK_START'].strftime('%I:%M %p')} to {break_entry[0]['BREAK_END'].strftime('%I:%M %p')}")
-            else:
+            else:  # No break taken
                 st.success("✅ Available for Break")
-    
-    
-    
 
-    
-    with col1:
-        time_entries = session.sql(f"""
+    # Calculate and display total worked time
+    time_entries = session.sql(f"""
         SELECT CLOCK_IN, CLOCK_OUT 
         FROM employee_time_entries
         WHERE EMPLOYEEID = '{st.session_state.user_id}'
@@ -453,7 +524,7 @@ def Home():
         ORDER BY CLOCK_IN
     """).collect()
     
-    # Get all break entries for today
+    # Get all break entries for the day
     break_entries = session.sql(f"""
         SELECT BREAK_START, BREAK_END 
         FROM employee_break_entries
@@ -463,15 +534,17 @@ def Home():
     """).collect()
 
     if time_entries:
-        # Calculate total worked time (sum of all clock_in to clock_out periods)
+        # Calculate total worked seconds
         total_seconds = 0
         for entry in time_entries:
             if entry['CLOCK_OUT']:
+                # Add difference between clock out and in times
                 total_seconds += (entry['CLOCK_OUT'] - entry['CLOCK_IN']).total_seconds()
             else:
+                # Add time since clock in if still clocked in
                 total_seconds += (datetime.now() - entry['CLOCK_IN']).total_seconds()
         
-        # Calculate total break time
+        # Calculate total break time in seconds
         break_seconds = 0
         for entry in break_entries:
             if entry['BREAK_END']:
@@ -479,136 +552,268 @@ def Home():
         
         # Calculate net worked time
         net_seconds = total_seconds - break_seconds
+        # Convert seconds to hours and minutes
         hours = int(net_seconds // 3600)
         minutes = int((net_seconds % 3600) // 60)
         
-        # Display in "X hours Y minutes" format
+        # Display time with proper pluralization
         time_str = f"{hours} hour{'s' if hours != 1 else ''} {minutes} minute{'s' if minutes != 1 else ''}"
-        st.metric("Total Worked Today", time_str)
-    
+        st.markdown("---")  # Horizontal line
+        st.metric("Total Worked Today", time_str)  # Display metric
+        st.markdown("---")
 
-    # Appointments section
-    with st.container(border=True):
-        st.subheader("📅 Your Appointments")
-    
-    # Get all appointments (today + upcoming 7 days)
+    # --- Upcoming Appointments Section ---
+    st.header("📅 Upcoming Appointments")  # Section header
+
+    # Query database for appointments
     appointments = session.sql(f"""
         SELECT 
             a.appointmentid,
-            c.name AS customer_name,
-            c.phone AS customer_phone,
-            c.address AS customer_address,
+            a.service_type,
             a.scheduled_time,
-            TO_VARCHAR(a.scheduled_time, 'YYYY-MM-DD') AS appointment_date,
-            DAYNAME(a.scheduled_time) AS day_of_week,
-            TO_VARCHAR(a.scheduled_time, 'HH12:MI AM') AS time_formatted,
-            a.sta_tus AS appointment_status,
-            CASE 
-                WHEN DATE(a.scheduled_time) = CURRENT_DATE() THEN 'Today'
-                WHEN DATE(a.scheduled_time) = DATEADD('day', 1, CURRENT_DATE()) THEN 'Tomorrow'
-                ELSE TO_VARCHAR(a.scheduled_time, 'Mon DD')
-            END AS display_date
+            a.sta_tus,
+            c.name AS customer_name,
+            c.address,
+            c.unit,
+            c.city,
+            c.state,
+            c.zipcode,
+            c.has_lock_box,
+            c.lock_box_code,
+            c.has_safety_alarm,
+            c.safety_alarm,
+            c.entrance_note,
+            c.note,
+            c.unit_location,
+            c.accessibility_level,
+            c.phone,
+            c.email
         FROM appointments a
         JOIN customers c ON a.customerid = c.customerid
         WHERE a.technicianid = '{st.session_state.user_id}'
-        AND DATE(a.scheduled_time) BETWEEN CURRENT_DATE() AND DATEADD('day', 7, CURRENT_DATE())
+        AND a.scheduled_time BETWEEN CURRENT_TIMESTAMP() 
+            AND DATEADD('day', 7, CURRENT_TIMESTAMP())
         ORDER BY a.scheduled_time
     """).collect()
-    
-    if not appointments:
-        st.info("No appointments scheduled for the next 7 days")
-    else:
-        # Display appointments with date, day, and time
-        for appt in appointments:
-            with st.expander(f"{appt['DAY_OF_WEEK']}, {appt['APPOINTMENT_DATE']} - {appt['CUSTOMER_NAME']} ({appt['TIME_FORMATTED']})"):
-                st.write(f"**Date:** {appt['APPOINTMENT_DATE']} ({appt['DAY_OF_WEEK']})")
-                st.write(f"**Time:** {appt['TIME_FORMATTED']}")
-                st.write(f"**Customer:** {appt['CUSTOMER_NAME']}")
-                st.write(f"**Phone:** {appt['CUSTOMER_PHONE']}")
-                st.write(f"**Address:** {appt['CUSTOMER_ADDRESS']}")
-                st.write(f"**Status:** {appt['APPOINTMENT_STATUS'].capitalize()}")
 
-   
- 
-##########################################################################################
-##########################################################################################
+    if not appointments:  # Handle no appointments case
+        st.info("No upcoming appointments in the next 7 days")
+        return
+
+    # Display each appointment in a row
+    for appt in appointments:
+        # Create 4-column layout per appointment
+        col1, col2, col3, col4 = st.columns([1,1,3,1])
+        
+        with col1:  # Service type column
+            st.markdown(f"**{appt['SERVICE_TYPE'].capitalize()}**")  # Capitalized service name
+        
+        with col2:  # Time column
+            dt = appt['SCHEDULED_TIME']
+            # Format date/time in compact form
+            st.write(f"{dt.strftime('%a %m/%d')}\n{dt.strftime('%I:%M %p')}")
+        
+        with col3:  # Customer info column
+            full_address = f"{appt['ADDRESS']}, {appt['CITY']}, {appt['STATE']} {appt['ZIPCODE']}"
+            # Create Google Maps link
+            maps_url = f"https://www.google.com/maps/search/?api=1&query={full_address.replace(' ', '+')}"
+            
+            # Expandable section for detailed customer info
+            with st.expander(f"**{appt['CUSTOMER_NAME']}** - {appt['ADDRESS']}, {appt['CITY']}"):
+                # Clickable address link
+                st.markdown(f"**Complete Address:** [📌 {full_address}]({maps_url})")
+                # Display all customer details
+                st.markdown(f"""
+                    **Unit #:** {appt['UNIT'] or 'N/A'}  
+                    **Lock Box Code:** {appt['LOCK_BOX_CODE'] if appt['HAS_LOCK_BOX'] == 'Yes' else 'N/A'}  
+                    **Safety Alarm:** {appt['SAFETY_ALARM'] if appt['HAS_SAFETY_ALARM'] == 'Yes' else 'N/A'}  
+                    **Entrance Notes:** {appt['ENTRANCE_NOTE'] or 'N/A'}  
+                    **General Notes:** {appt['NOTE'] or 'N/A'}  
+                    **Unit Location:** {appt['UNIT_LOCATION']}  
+                    **Accessibility:** {appt['ACCESSIBILITY_LEVEL']}  
+                    **Phone:** {appt['PHONE']}  
+                    **Email:** {appt['EMAIL'] or 'N/A'}
+                """)
+
+        with col4:  # Status management column
+            current_status = appt['STA_TUS'].lower()  # Get lowercase status
+            # Color coding for status badges
+            status_colors = {
+                'scheduled': '#4a4a4a',  # Dark gray
+                'accepted': '#2e7d32',   # Green
+                'declined': '#c62828',    # Red
+                'arrived': '#1565c0'      # Blue
+            }
+            
+            # Create styled status badge
+            st.markdown(f"""
+                <div style="
+                    background-color: {status_colors.get(current_status, '#4a4a4a')};
+                    color: white;
+                    padding: 0.5rem;
+                    border-radius: 0.5rem;
+                    text-align: center;
+                    margin: 0.5rem 0;
+                    font-size: 0.9rem;
+                ">
+                    {current_status.capitalize()}
+                </div>
+            """, unsafe_allow_html=True)
+            
+            # Status transition buttons
+            if current_status == 'scheduled':
+                # Accept appointment button
+                if st.button("✅ Accept", key=f"accept_{appt['APPOINTMENTID']}"):
+                    session.sql(f"""
+                        UPDATE appointments
+                        SET STA_TUS = 'accepted'
+                        WHERE APPOINTMENTID = '{appt['APPOINTMENTID']}'
+                    """).collect()
+                    st.rerun()
+                
+                # Decline appointment button
+                if st.button("❌ Decline", key=f"decline_{appt['APPOINTMENTID']}"):
+                    session.sql(f"""
+                        UPDATE appointments
+                        SET STA_TUS = 'declined'
+                        WHERE APPOINTMENTID = '{appt['APPOINTMENTID']}'
+                    """).collect()
+                    st.rerun()
+            
+            elif current_status == 'accepted':
+                # Mark as arrived button
+                if st.button("📍 I'm Here", key=f"arrived_{appt['APPOINTMENTID']}"):
+                    session.sql(f"""
+                        UPDATE appointments
+                        SET STA_TUS = 'arrived'
+                        WHERE APPOINTMENTID = '{appt['APPOINTMENTID']}'
+                    """).collect()
+                    st.rerun()
+
+        st.markdown("---")  # Divider between appointments
+        
+        
+        
+        
 #######################################################################
-##########################################################################################
-
-#profile
+#######################################################################        
+#######################################################################
 def profile_page():
+    # Establish connection to Snowflake database using existing session
     session = get_session()
-    st.title("User Profile")
     
-    # --- 1. Profile Picture Section ---
-    with st.container():
-        col1, col2 = st.columns([1, 3])
-        with col1:
-            # Current profile picture display
-            pic_data = session.sql(f"""
-                SELECT PICTURE_DATA_TEXT FROM EMPLOYEE_PICTURES
-                WHERE EMPLOYEEID = '{st.session_state.user_id}'
-                ORDER BY UPLOADED_AT DESC LIMIT 1
-            """).collect()
-            
-            if pic_data and pic_data[0]['PICTURE_DATA_TEXT']:
-                img_data = base64.b64decode(pic_data[0]['PICTURE_DATA_TEXT'])
-                img = Image.open(io.BytesIO(img_data))
-                img.thumbnail((150, 150), Image.Resampling.LANCZOS)
-                st.image(img, width=120)
-            else:
-                st.image(Image.new('RGB', (120, 120), color='lightgray'))
-            
-            # Picture upload
-            uploaded_file = st.file_uploader("Update Profile Picture", type=["jpg", "jpeg", "png"])
-            if uploaded_file and st.button("Update Picture"):
+    # --- Profile Header Section ---
+    # Create two columns layout (1:4 ratio) for profile picture and info
+    col1, col2 = st.columns([1, 4])
+    
+    with col1:  # Left column for profile picture
+        # Query database for most recent profile picture
+        pic_data = session.sql(f"""
+            SELECT PICTURE_DATA_TEXT FROM EMPLOYEE_PICTURES
+            WHERE EMPLOYEEID = '{st.session_state.user_id}'
+            ORDER BY UPLOADED_AT DESC LIMIT 1
+        """).collect()
+        
+        # Display profile picture if exists
+        if pic_data and pic_data[0]['PICTURE_DATA_TEXT']:
+            # Decode base64 image data
+            img_data = base64.b64decode(pic_data[0]['PICTURE_DATA_TEXT'])
+            # Open image and resize
+            img = Image.open(io.BytesIO(img_data))
+            img.thumbnail((80, 80), Image.Resampling.LANCZOS)
+            # Display resized image
+            st.image(img, width=80)
+        else:
+            # Show placeholder gray image
+            st.image(Image.new('RGB', (80, 80), color='lightgray'))
+        
+        # Create expandable section for picture upload
+        with st.expander("🖼"):  # Frame emoji as icon
+            # Add hidden tooltip
+            st.markdown("<span title='Update profile picture'>", unsafe_allow_html=True)
+            # File uploader widget (hidden label)
+            uploaded_file = st.file_uploader("", type=["jpg", "jpeg", "png"], key="pic_uploader")
+            # Update button with image processing
+            if uploaded_file and st.button("Update", key="pic_update"):
                 try:
+                    # Process uploaded image
                     img = Image.open(uploaded_file)
-                    img = ImageOps.fit(img, (500, 500))
+                    img = ImageOps.fit(img, (500, 500))  # Crop to square
+                    # Save to buffer with quality settings
                     buffer = io.BytesIO()
                     img.save(buffer, format="JPEG", quality=90)
+                    # Encode image for database storage
                     encoded_image = base64.b64encode(buffer.getvalue()).decode('utf-8')
                     
+                    # Insert new picture record
                     session.sql(f"""
                         INSERT INTO EMPLOYEE_PICTURES 
                         (PICTUREID, EMPLOYEEID, PICTURE_DATA_TEXT)
                         VALUES (
-                            'PIC{datetime.now().timestamp()}',
+                            'PIC{datetime.now().timestamp()}',  
+
                             '{st.session_state.user_id}',
-                            '{encoded_image}'
+                          
+                            '{encoded_image}'  
                         )
                     """).collect()
-                    st.success("Picture updated!")
-                    st.rerun()
+                    st.rerun()  # Refresh to show new picture
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
+            # Close tooltip span
+            st.markdown("</span>", unsafe_allow_html=True)
 
-    # --- 2. Weekly Schedule (Same as Admin View) ---
-    with st.container():
-        st.subheader("📅 Your Weekly Schedule")
-        
-        # Date range selection - default to current week
-        today = datetime.now().date()
-        start_of_week = today - timedelta(days=today.weekday())
-        end_of_week = start_of_week + timedelta(days=6)
-        
-        # Get employee name
+    with col2:  # Right column for profile info
+        # Display user name as title
+        st.title(f"{st.session_state.user_name}'s Profile")
+        # Show employee ID in caption
+        st.caption(f"Employee ID: {st.session_state.user_id}")
+
+    # --- Date Range Selector ---
+    # Set default date range to current week
+    today = datetime.now().date()
+    start_of_week = today - timedelta(days=today.weekday())  # Monday
+    end_of_week = start_of_week + timedelta(days=6)  # Sunday
+    
+    # Create expandable date selector
+    with st.expander("📅 Date Range", expanded=True):
+        col1, col2 = st.columns(2)  # Split into two columns
+        with col1:
+            # Start date picker with week start default
+            start_date = st.date_input("From", value=start_of_week)
+        with col2:
+            # End date picker with week end default
+            end_date = st.date_input("To", value=end_of_week, min_value=start_date)
+
+    # --- Tab Navigation ---
+    # Create four tabs for different sections
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📅 Schedule", 
+        "⏱ Work History", 
+        "💰 Earnings", 
+        "📝 Appointments"
+    ])
+
+    # Tab 1: Schedule
+    with tab1:
+        # Get employee name from database
         employee_name = session.sql(f"""
             SELECT ename FROM employees
             WHERE employeeid = '{st.session_state.user_id}'
         """).collect()[0]['ENAME']
         
-        # Get all schedules for the current employee this week
+        # Query schedule data
         schedules = session.sql(f"""
             SELECT * FROM employee_schedules
             WHERE employeeid = '{st.session_state.user_id}'
-            AND schedule_date BETWEEN '{start_of_week}' AND '{end_of_week}'
+            AND schedule_date BETWEEN '{start_date}' AND '{end_date}'
             ORDER BY schedule_date, start_time
         """).collect()
         
-        # Create calendar view - days as columns, hours as rows
+        # Custom CSS styling for schedule table
         st.markdown("""
         <style>
+            /* Employee time block styling */
             .employee-box {
                 display: inline-block;
                 background-color: #e6f7ff;
@@ -618,19 +823,24 @@ def profile_page():
                 font-size: 12px;
                 border: 1px solid #b3e0ff;
             }
+            /* Table styling */
             .schedule-table {
                 width: 100%;
                 border-collapse: collapse;
+                font-size: 14px;
             }
+            /* Cell styling */
             .schedule-table th, .schedule-table td {
                 border: 1px solid #ddd;
                 padding: 8px;
                 text-align: center;
             }
+            /* Header styling */
             .schedule-table th {
                 background-color: #f2f2f2;
                 font-weight: bold;
             }
+            /* Time column styling */
             .time-col {
                 background-color: #f9f9f9;
                 font-weight: bold;
@@ -638,7 +848,7 @@ def profile_page():
         </style>
         """, unsafe_allow_html=True)
         
-        # Define time slots (8AM to 6PM in 2-hour increments)
+        # Define time slots for schedule grid
         time_slots = [
             ("8:00-10:00", time(8, 0), time(10, 0)),
             ("10:00-12:00", time(10, 0), time(12, 0)),
@@ -647,39 +857,42 @@ def profile_page():
             ("16:00-18:00", time(16, 0), time(18, 0))
         ]
         
-        # Get all days in the week
-        days = [(start_of_week + timedelta(days=i)).strftime("%a %m/%d") for i in range(7)]
-        day_dates = [start_of_week + timedelta(days=i) for i in range(7)]
+        # Generate date labels for columns
+        days = [(start_date + timedelta(days=i)).strftime("%a %m/%d") 
+               for i in range((end_date - start_date).days + 1)]
+        # Generate actual date objects
+        day_dates = [start_date + timedelta(days=i) 
+                    for i in range((end_date - start_date).days + 1)]
         
-        # Create HTML table
+        # Build HTML table structure
         table_html = """
         <table class="schedule-table">
             <tr>
                 <th>Time Slot</th>
         """
-        
         # Add day headers
         for day in days:
             table_html += f"<th>{day}</th>"
         table_html += "</tr>"
         
-        # Add time slots and employee boxes
+        # Populate table rows
         for slot_name, slot_start, slot_end in time_slots:
             table_html += f"<tr><td class='time-col'>{slot_name}</td>"
             
+            # Check each day for scheduled time
             for day_date in day_dates:
-                # Find schedules for this day and time slot
                 scheduled = False
                 for s in schedules:
                     if s['SCHEDULE_DATE'] == day_date:
+                        # Get schedule times
                         s_start = s['START_TIME']
                         s_end = s['END_TIME']
-                        # Check if schedule overlaps with time slot
+                        # Check for time overlap
                         if (s_start < slot_end) and (s_end > slot_start):
                             scheduled = True
                             break
                 
-                # Create cell with employee box if scheduled
+                # Add cell content
                 table_html += "<td>"
                 if scheduled:
                     table_html += f"<div class='employee-box'>{employee_name}</div>"
@@ -688,15 +901,12 @@ def profile_page():
             table_html += "</tr>"
         
         table_html += "</table>"
-        
-        # Display the table
+        # Render HTML table
         st.markdown(table_html, unsafe_allow_html=True)
 
-    # --- 3. Time Tracking Section ---
-    with st.container():
-        st.subheader("🕒 Time Tracking")
-        
-        # Get time entries for current week
+    # Tab 2: Work History
+    with tab2:
+        # Query time entries from database
         time_entries = session.sql(f"""
             SELECT 
                 ENTRY_DATE,
@@ -705,87 +915,106 @@ def profile_page():
                 TIMEDIFF('MINUTE', CLOCK_IN, CLOCK_OUT)/60.0 as hours_worked
             FROM employee_time_entries
             WHERE EMPLOYEEID = '{st.session_state.user_id}'
-            AND ENTRY_DATE BETWEEN '{start_of_week}' AND '{end_of_week}'
+            AND ENTRY_DATE BETWEEN '{start_date}' AND '{end_date}'
             ORDER BY ENTRY_DATE DESC, CLOCK_IN DESC
         """).collect()
         
         if time_entries:
-            # Prepare table data
-            table_data = []
-            total_hours = 0
-            for entry in time_entries:
-                hours = entry['HOURS_WORKED'] or 0
-                total_hours += hours
-                table_data.append({
-                    "Date": entry['ENTRY_DATE'].strftime('%Y-%m-%d'),
-                    "Clock In": entry['CLOCK_IN'].strftime('%I:%M %p') if entry['CLOCK_IN'] else "N/A",
-                    "Clock Out": entry['CLOCK_OUT'].strftime('%I:%M %p') if entry['CLOCK_OUT'] else "N/A",
-                    "Hours Worked": f"{hours:.2f}"
-                })
+            # Calculate total hours
+            total_hours = sum(entry['HOURS_WORKED'] or 0 for entry in time_entries)
             
-            # Display table
+            # Create formatted dataframe
             st.dataframe(
-                pd.DataFrame(table_data),
-                column_config={
-                    "Date": st.column_config.Column(width="small"),
-                    "Clock In": st.column_config.Column(width="small"),
-                    "Clock Out": st.column_config.Column(width="small"),
-                    "Hours Worked": st.column_config.Column(width="small")
-                },
+                pd.DataFrame([{
+                    "Date": e['ENTRY_DATE'].strftime('%Y-%m-%d'),
+                    "Clock In": e['CLOCK_IN'].strftime('%I:%M %p') if e['CLOCK_IN'] else "-",
+                    "Clock Out": e['CLOCK_OUT'].strftime('%I:%M %p') if e['CLOCK_OUT'] else "-",
+                    "Hours": f"{e['HOURS_WORKED']:.2f}" if e['HOURS_WORKED'] else "-"
+                } for e in time_entries]),
+                hide_index=True,  # Hide pandas index
+                use_container_width=True  # Full-width display
+            )
+            
+            # Display total hours metric
+            st.metric("Total Hours Worked", f"{total_hours:.2f}")
+        else:
+            st.info("No work history for selected period")
+
+    # Tab 3: Earnings
+    with tab3:
+        # Get employee hourly rate
+        emp_rate = session.sql(f"""
+            SELECT hourlyrate FROM employees
+            WHERE employeeid = '{st.session_state.user_id}'
+        """).collect()[0]['HOURLYRATE']
+        
+        # Query earnings data
+        earnings = session.sql(f"""
+            SELECT 
+                ENTRY_DATE,
+                SUM(TIMEDIFF('MINUTE', CLOCK_IN, CLOCK_OUT)/60.0) as hours_worked
+            FROM employee_time_entries
+            WHERE EMPLOYEEID = '{st.session_state.user_id}'
+            AND CLOCK_OUT IS NOT NULL  
+            AND ENTRY_DATE BETWEEN '{start_date}' AND '{end_date}'
+            GROUP BY ENTRY_DATE
+            ORDER BY ENTRY_DATE DESC
+        """).collect()
+        
+        if earnings:
+            # Calculate total earnings
+            total_earnings = sum(e['HOURS_WORKED'] * emp_rate for e in earnings)
+            
+            # Display earnings dataframe
+            st.dataframe(
+                pd.DataFrame([{
+                    "Date": e['ENTRY_DATE'].strftime('%Y-%m-%d'),
+                    "Hours": f"{e['HOURS_WORKED']:.2f}",
+                    "Rate": f"${emp_rate:.2f}",
+                    "Earnings": f"${e['HOURS_WORKED'] * emp_rate:.2f}"
+                } for e in earnings]),
                 hide_index=True,
                 use_container_width=True
             )
             
-            # Display totals
-            st.metric("Total Hours Worked This Week", f"{total_hours:.2f}")
+            # Show total earnings metric
+            st.metric("Total Earnings", f"${total_earnings:.2f}")
         else:
-            st.info("No time records found for this week")
+            st.info("No earnings data for selected period")
 
-    # --- 4. Upcoming Appointments ---
-    with st.container():
-        st.subheader("📅 Upcoming Appointments")
-        
-        # Get appointments for next 7 days
+    # Tab 4: Appointments
+    with tab4:
+        # Query appointments from database
         appointments = session.sql(f"""
             SELECT 
-                c.name as customer_name,
-                c.phone as customer_phone,
-                c.address as customer_address,
+                c.name as customer,
                 a.scheduled_time,
-                TO_VARCHAR(a.scheduled_time, 'HH12:MI AM') AS time_formatted,
+                TO_VARCHAR(a.scheduled_time, 'HH12:MI AM') as time,
+                a.sta_tus as status,
                 a.notes
             FROM appointments a
             JOIN customers c ON a.customerid = c.customerid
             WHERE a.technicianid = '{st.session_state.user_id}'
-            AND DATE(a.scheduled_time) BETWEEN CURRENT_DATE() AND DATEADD('day', 7, CURRENT_DATE())
+            AND DATE(a.scheduled_time) BETWEEN '{start_date}' AND '{end_date}'
             ORDER BY a.scheduled_time
         """).collect()
         
         if appointments:
+            # Display each appointment in expandable sections
             for appt in appointments:
-                with st.expander(f"{appt['SCHEDULED_TIME'].strftime('%A %m/%d')} - {appt['CUSTOMER_NAME']} ({appt['TIME_FORMATTED']})"):
-                    st.write(f"**Customer:** {appt['CUSTOMER_NAME']}")
-                    st.write(f"**Phone:** {appt['CUSTOMER_PHONE']}")
-                    st.write(f"**Address:** {appt['CUSTOMER_ADDRESS']}")
+                # Create expander with formatted title
+                with st.expander(f"{appt['SCHEDULED_TIME'].strftime('%a %m/%d')} - {appt['CUSTOMER']} ({appt['TIME']})"):
+                    st.write(f"**Status:** {appt['STATUS'].capitalize()}")
                     if appt['NOTES']:
                         st.write(f"**Notes:** {appt['NOTES']}")
         else:
-            st.info("No appointments scheduled for the next 7 days")
-      
-          
- 
+            st.info("No appointments for selected period") 
+
+
 
 ######################################################################            
 #######################################################################            
 #######################################################################
-
-
-#######################################################################
-#######################################################################
-#######################################################################
-#######################################################################
-# Customer management 
-
 def customer_management():
     st.subheader("👥 Customer Management")
     session = get_session()
@@ -801,25 +1030,34 @@ def customer_management():
             'city': '',
             'state': 'MD',
             'zipcode': '',
-            'latitude': 0.0,
-            'longitude': 0.0,
             'has_lock_box': 'No',
             'lock_box_code': '',
+            'has_safety_alarm': 'No',
+            'safety_alarm_code': '',
             'how_heard': '',
             'friend_name': '',
-            'note': ''
+            'note': '',
+            'entrance_note': '',
+            'outdoor_unit_model': '',
+            'outdoor_unit_serial': '',
+            'indoor_unit_model': '',
+            'indoor_unit_serial': '',
+            'thermostat_type': '',
+            'unit_location': 'Attic',
+            'accessibility_level': 'Easy',
         }
 
     # --- Add New Customer Section ---
     with st.expander("➕ Add New Customer", expanded=False):
-        with st.form("add_customer_form", clear_on_submit=True):
+        form_key = "add_customer_form"
+        with st.form(key=form_key, clear_on_submit=True):
             col1, col2 = st.columns(2)
             
             with col1:
                 name = st.text_input("Full Name*", value=st.session_state.customer_form_data['name'])
                 phone = st.text_input("Phone* (###-###-####)", value=st.session_state.customer_form_data['phone'], placeholder="301-555-1234")
                 email = st.text_input("Email", value=st.session_state.customer_form_data['email'])
-                address = st.text_input("Address*", value=st.session_state.customer_form_data['address'])
+                address = st.text_input("Street Address*", value=st.session_state.customer_form_data['address'])
                 unit = st.text_input("Unit/Apt", value=st.session_state.customer_form_data['unit'])
                 
             with col2:
@@ -833,29 +1071,96 @@ def customer_management():
                     ["", "Google", "Friend", "Facebook", "Yelp", "Other"],
                     index=0
                 )
-                
-                # Show friend name field only if "Friend" is selected
                 friend_name = ""
                 if how_heard == "Friend":
                     friend_name = st.text_input("Friend's Name*", value=st.session_state.customer_form_data['friend_name'])
-                
-                # Lock Box section
-                has_lock_box = st.radio("Lock Box", ["No", "Yes"], index=0 if st.session_state.customer_form_data['has_lock_box'] == 'No' else 1, horizontal=True)
-                
-                # Show lock box code only if "Yes" is selected
-                lock_box_code = ""
+            
+            # Lock Box and Safety Alarm section
+            col1, col2 = st.columns(2)
+            with col1:
+                has_lock_box = st.radio("Lock Box", ["No", "Yes"], 
+                                      index=0 if st.session_state.customer_form_data['has_lock_box'] == 'No' else 1, 
+                                      horizontal=True)
                 if has_lock_box == "Yes":
                     lock_box_code = st.text_input("Lock Box Code*", value=st.session_state.customer_form_data['lock_box_code'])
             
-            # Additional fields
-            note = st.text_area("Note", value=st.session_state.customer_form_data['note'])
+            with col2:
+                has_safety_alarm = st.radio("Safety Alarm", ["No", "Yes"], 
+                                          index=0 if st.session_state.customer_form_data['has_safety_alarm'] == 'No' else 1, 
+                                          horizontal=True)
+                if has_safety_alarm == "Yes":
+                    safety_alarm_code = st.text_input("Safety Alarm Code*", value=st.session_state.customer_form_data['safety_alarm_code'])
+            
+            # Equipment Information
+            st.subheader("Equipment Information")
+            col1, col2 = st.columns(2)
+            with col1:
+                outdoor_unit_model = st.text_input("Outdoor Unit Model", value=st.session_state.customer_form_data['outdoor_unit_model'])
+                outdoor_unit_serial = st.text_input("Outdoor Unit Serial Number", value=st.session_state.customer_form_data['outdoor_unit_serial'])
+                indoor_unit_model = st.text_input("Indoor Unit Model", value=st.session_state.customer_form_data['indoor_unit_model'])
+                indoor_unit_serial = st.text_input("Indoor Unit Serial Number", value=st.session_state.customer_form_data['indoor_unit_serial'])
+                
+            with col2:
+                thermostat_type = st.text_input("Thermostat Type", value=st.session_state.customer_form_data['thermostat_type'])
+                unit_location = st.selectbox(
+                    "Unit Location",
+                    ["Attic", "Basement", "Garage", "Closet", "Crawlspace", "Other"],
+                    index=["Attic", "Basement", "Garage", "Closet", "Crawlspace", "Other"].index(
+                        st.session_state.customer_form_data['unit_location'])
+                )
+                accessibility_level = st.selectbox(
+                    "Accessibility Level",
+                    ["Easy", "Moderate", "Difficult", "Very Difficult"],
+                    index=["Easy", "Moderate", "Difficult", "Very Difficult"].index(
+                        st.session_state.customer_form_data['accessibility_level'])
+                )
+            
+            # Upload pictures
+            st.subheader("Unit Pictures")
+            uploaded_files = st.file_uploader("Upload pictures of the HVAC unit", 
+                                            accept_multiple_files=True, 
+                                            type=['jpg', 'jpeg', 'png'])
+            
+            # Notes section
+            note = st.text_area("General Notes", value=st.session_state.customer_form_data['note'])
+            entrance_note = st.text_area("Entrance Notes", value=st.session_state.customer_form_data['entrance_note'])
 
-            # Submit button for the form
-            submitted = st.form_submit_button("Add Customer")
+            # Form actions
+            col1, col2 = st.columns(2)
+            with col1:
+                submitted = st.form_submit_button("Add Customer")
+            with col2:
+                if st.form_submit_button("Cancel"):
+                    st.session_state.customer_form_data = {
+                        'name': '',
+                        'phone': '',
+                        'email': '',
+                        'address': '',
+                        'unit': '',
+                        'city': '',
+                        'state': 'MD',
+                        'zipcode': '',
+                        'has_lock_box': 'No',
+                        'lock_box_code': '',
+                        'has_safety_alarm': 'No',
+                        'safety_alarm_code': '',
+                        'how_heard': '',
+                        'friend_name': '',
+                        'note': '',
+                        'entrance_note': '',
+                        'outdoor_unit_model': '',
+                        'outdoor_unit_serial': '',
+                        'indoor_unit_model': '',
+                        'indoor_unit_serial': '',
+                        'thermostat_type': '',
+                        'unit_location': 'Attic',
+                        'accessibility_level': 'Easy'
+                    }
+                    st.rerun()
             
             if submitted:
-                # Store all values in session state for persistence
-                st.session_state.customer_form_data = {
+                # Store all values in session state
+                st.session_state.customer_form_data.update({
                     'name': name,
                     'phone': phone,
                     'email': email,
@@ -864,14 +1169,22 @@ def customer_management():
                     'city': city,
                     'state': state,
                     'zipcode': zipcode,
-                    'latitude': 0.0,
-                    'longitude': 0.0,
                     'has_lock_box': has_lock_box,
-                    'lock_box_code': lock_box_code,
+                    'lock_box_code': lock_box_code if has_lock_box == "Yes" else '',
+                    'has_safety_alarm': has_safety_alarm,
+                    'safety_alarm_code': safety_alarm_code if has_safety_alarm == "Yes" else '',
                     'how_heard': how_heard,
-                    'friend_name': friend_name if how_heard == "Friend" else "",
-                    'note': note
-                }
+                    'friend_name': friend_name if how_heard == "Friend" else '',
+                    'note': note,
+                    'entrance_note': entrance_note,
+                    'outdoor_unit_model': outdoor_unit_model,
+                    'outdoor_unit_serial': outdoor_unit_serial,
+                    'indoor_unit_model': indoor_unit_model,
+                    'indoor_unit_serial': indoor_unit_serial,
+                    'thermostat_type': thermostat_type,
+                    'unit_location': unit_location,
+                    'accessibility_level': accessibility_level
+                })
 
                 # Validate required fields
                 errors = []
@@ -893,10 +1206,12 @@ def customer_management():
                     errors.append("Invalid zip code format (use 5 or 9 digits)")
                 if email and not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", email):
                     errors.append("Invalid email format")
-                if has_lock_box == "Yes" and not lock_box_code:
-                    errors.append("Lock Box Code is required when Lock Box is Yes")
                 if how_heard == "Friend" and not friend_name:
-                    errors.append("Friend's Name is required when referral is from a friend")
+                    errors.append("Friend's Name is required when referral is from friend")
+                if has_lock_box == "Yes" and not lock_box_code:
+                    errors.append("Lock Box Code is required when Lock Box is set to Yes")
+                if has_safety_alarm == "Yes" and not safety_alarm_code:
+                    errors.append("Safety Alarm Code is required when Safety Alarm is set to Yes")
 
                 if errors:
                     for error in errors:
@@ -931,14 +1246,20 @@ def customer_management():
                         # Build the insert query with proper string escaping
                         email_escaped = email.replace("'", "''") if email else None
                         unit_escaped = unit.replace("'", "''") if unit else None
-                        lock_box_code_escaped = lock_box_code.replace("'", "''") if lock_box_code else None
+                        lock_box_code_escaped = lock_box_code.replace("'", "''") if has_lock_box == "Yes" and lock_box_code else None
+                        safety_alarm_code_escaped = safety_alarm_code.replace("'", "''") if has_safety_alarm == "Yes" and safety_alarm_code else None
                         how_heard_value_escaped = how_heard_value.replace("'", "''") if how_heard_value else None
                         note_escaped = note.replace("'", "''") if note else None
+                        entrance_note_escaped = entrance_note.replace("'", "''") if entrance_note else None
                         
+                        # Insert customer record with all equipment info
                         insert_query = f"""
                             INSERT INTO customers 
                             (CUSTOMERID, NAME, PHONE, EMAIL, ADDRESS, UNIT, CITY, STATE, ZIPCODE,
-                             LATITUDE, LONGITUDE, HAS_LOCK_BOX, LOCK_BOX_CODE, HOW_HEARD, NOTE)
+                             HAS_LOCK_BOX, LOCK_BOX_CODE, HAS_SAFETY_ALARM, SAFETY_ALARM, HOW_HEARD, 
+                             NOTE, ENTRANCE_NOTE, OUTDOOR_UNIT_MODEL, OUTDOOR_UNIT_SERIAL_NUMBER,
+                             INDOOR_UNIT_MODEL, INDOOR_UNIT_SERIAL_NUMBER, THERMOSTAT_TYPE,
+                             UNIT_LOCATION, ACCESSIBILITY_LEVEL, ACCESSIBILITY_NOTES, OTHER_NOTES)
                             VALUES (
                                 '{customer_id}',
                                 '{name.replace("'", "''")}',
@@ -949,16 +1270,44 @@ def customer_management():
                                 '{city.replace("'", "''")}',
                                 '{state}',
                                 '{zipcode}',
-                                0.0,
-                                0.0,
                                 '{has_lock_box}',
-                                {f"'{lock_box_code_escaped}'" if lock_box_code else 'NULL'},
+                                {f"'{lock_box_code_escaped}'" if has_lock_box == "Yes" and lock_box_code else 'NULL'},
+                                '{has_safety_alarm}',
+                                {f"'{safety_alarm_code_escaped}'" if has_safety_alarm == "Yes" and safety_alarm_code else 'NULL'},
                                 {f"'{how_heard_value_escaped}'" if how_heard_value else 'NULL'},
-                                {f"'{note_escaped}'" if note else 'NULL'}
+                                {f"'{note_escaped}'" if note else 'NULL'},
+                                {f"'{entrance_note_escaped}'" if entrance_note else 'NULL'},
+                                '{outdoor_unit_model.replace("'", "''")}',
+                                '{outdoor_unit_serial.replace("'", "''")}',
+                                '{indoor_unit_model.replace("'", "''")}',
+                                '{indoor_unit_serial.replace("'", "''")}',
+                                '{thermostat_type.replace("'", "''")}',
+                                '{unit_location}',
+                                '{accessibility_level}',
+                                '',
+                                ''
                             )
                         """
                         
                         session.sql(insert_query).collect()
+                        
+                        # Handle uploaded files
+                        if uploaded_files:
+                            for uploaded_file in uploaded_files:
+                                file_data = uploaded_file.read()
+                                encoded_file = base64.b64encode(file_data).decode('utf-8')
+                                session.sql(f"""
+                                    INSERT INTO customer_documents 
+                                    (DOC_ID, CUSTOMERID, DOC_TYPE, DESCRIPTION, DOC_DATA)
+                                    VALUES (
+                                        'DOC{datetime.now().timestamp()}',
+                                        '{customer_id}',
+                                        'IMAGE',
+                                        'Unit Picture - {uploaded_file.name}',
+                                        '{encoded_file}'
+                                    )
+                                """).collect()
+                        
                         st.success(f"✅ Customer added successfully! Customer ID: {customer_id}")
                         
                         # Clear form data after successful submission
@@ -971,57 +1320,490 @@ def customer_management():
                             'city': '',
                             'state': 'MD',
                             'zipcode': '',
-                            'latitude': 0.0,
-                            'longitude': 0.0,
                             'has_lock_box': 'No',
                             'lock_box_code': '',
+                            'has_safety_alarm': 'No',
+                            'safety_alarm_code': '',
                             'how_heard': '',
                             'friend_name': '',
-                            'note': ''
+                            'note': '',
+                            'entrance_note': '',
+                            'outdoor_unit_model': '',
+                            'outdoor_unit_serial': '',
+                            'indoor_unit_model': '',
+                            'indoor_unit_serial': '',
+                            'thermostat_type': '',
+                            'unit_location': 'Attic',
+                            'accessibility_level': 'Easy'
                         }
                         
                         # Force a rerun to clear the form
                         st.rerun()
-                        
                     except Exception as e:
                         st.error(f"Error adding customer: {str(e)}")
 
-    # --- Customer Search and Edit Section ---
+    # --- Customer Search and Display Section ---
+    
+
+    
     st.subheader("🔍 Search Customers")
     search_term = st.text_input("", placeholder="Search by name, phone, email, or address", key="unified_search")
     
     if search_term:
         customers = session.sql(f"""
-            SELECT * FROM customers 
-            WHERE NAME ILIKE '%{search_term}%' 
-               OR PHONE ILIKE '%{search_term}%'
-               OR EMAIL ILIKE '%{search_term}%'
-               OR ADDRESS ILIKE '%{search_term}%'
-            ORDER BY NAME
+            SELECT c.* FROM customers c
+            WHERE c.NAME ILIKE '%{search_term}%' 
+               OR c.PHONE ILIKE '%{search_term}%'
+               OR c.EMAIL ILIKE '%{search_term}%'
+               OR c.ADDRESS ILIKE '%{search_term}%'
+            ORDER BY c.NAME
         """).collect()
         
         if customers:
             for customer in customers:
-                with st.expander(f"{customer['NAME']} - {customer['PHONE']}"):
+                # Convert Row to dictionary safely
+                try:
+                    customer_dict = customer.as_dict() if hasattr(customer, 'as_dict') else dict(zip(customer._fields, customer))
+                except:
+                    customer_dict = dict(zip(['CUSTOMERID', 'NAME', 'PHONE', 'EMAIL', 'ADDRESS', 'UNIT', 'CITY', 'STATE', 'ZIPCODE',
+                                            'HAS_LOCK_BOX', 'LOCK_BOX_CODE', 'HAS_SAFETY_ALARM', 'SAFETY_ALARM', 'HOW_HEARD',
+                                            'CREATED_AT', 'LAST_QUOTE_ID', 'LAST_QUOTE_DATE', 'NOTE', 'ENTRANCE_NOTE',
+                                            'OUTDOOR_UNIT_MODEL', 'OUTDOOR_UNIT_SERIAL_NUMBER', 'INDOOR_UNIT_MODEL', 
+                                            'INDOOR_UNIT_SERIAL_NUMBER', 'THERMOSTAT_TYPE', 'UNIT_LOCATION', 
+                                            'ACCESSIBILITY_LEVEL', 'ACCESSIBILITY_NOTES', 'OTHER_NOTES'], customer))
+                
+                with st.expander(f"{customer_dict['NAME']} - {customer_dict['PHONE']}"):
+                    # Customer Information
+                    st.subheader("Customer Information")
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        st.write(f"**Customer ID:** {customer['CUSTOMERID']}")
-                        st.write(f"**Email:** {customer['EMAIL'] or 'Not provided'}")
-                        st.write(f"**Address:** {customer['ADDRESS']}")
+                        st.write(f"**Customer ID:** {customer_dict['CUSTOMERID']}")
+                        st.write(f"**Email:** {customer_dict.get('EMAIL', 'Not provided')}")
+                        
+                        # Address display with Google Maps link
+                        full_address = f"{customer_dict['ADDRESS']}, {customer_dict['CITY']}, {customer_dict['STATE']} {customer_dict['ZIPCODE']}"
+                        maps_url = f"https://www.google.com/maps/search/?api=1&query={full_address.replace(' ', '+')}"
+                        st.markdown(f"""
+                            **Address:** <a href="{maps_url}" target="_blank" style="color: blue; text-decoration: none;">
+                            {customer_dict['ADDRESS']}{', ' + customer_dict['UNIT'] if customer_dict.get('UNIT') else ''}<br>
+                            {customer_dict['CITY']}, {customer_dict['STATE']} {customer_dict['ZIPCODE']}.
+                            </a>
+                        """, unsafe_allow_html=True)
                         
                     with col2:
-                        st.write(f"**Lock Box:** {'Yes' if customer.get('HAS_LOCK_BOX', False) else 'No'}")
-                        if customer.get('HAS_LOCK_BOX', False):
-                            st.write(f"**Lock Box Code:** {customer.get('LOCK_BOX_CODE', 'Not provided')}")
-                        st.write(f"**How Heard:** {customer.get('HOW_HEARD', 'Not specified')}")
+                        # Lock Box Section with input box
+                        has_lock_box = customer_dict.get('HAS_LOCK_BOX', 'No')
+                        lock_box_code = st.text_input(
+                            "Lock Box Code",
+                            value=customer_dict.get('LOCK_BOX_CODE', ''),
+                            disabled=(has_lock_box != 'Yes'),
+                            key=f"lock_box_{customer_dict['CUSTOMERID']}"
+                        )
+                        if has_lock_box == 'Yes' and not lock_box_code:
+                            st.error("Lock box code is required when lock box is present")
+                        
+                        # Safety Alarm Section with input box
+                        has_safety_alarm = customer_dict.get('HAS_SAFETY_ALARM', 'No')
+                        safety_alarm_code = st.text_input(
+                            "Safety Alarm Code",
+                            value=customer_dict.get('SAFETY_ALARM', ''),
+                            disabled=(has_safety_alarm != 'Yes'),
+                            key=f"safety_alarm_{customer_dict['CUSTOMERID']}"
+                        )
+                        if has_safety_alarm == 'Yes' and not safety_alarm_code:
+                            st.error("Safety alarm code is required when safety alarm is present")
                     
-                    st.write(f"**Note:** {customer.get('NOTE', 'None')}")
+                    st.write(f"**How Heard:** {customer_dict.get('HOW_HEARD', 'Not specified')}")
+                    st.write(f"**General Note:** {customer_dict.get('NOTE', 'None')}")
+                    st.write(f"**Entrance Note:** {customer_dict.get('ENTRANCE_NOTE', 'None')}")
+                    
+                    # Show ONLY this customer's appointments
+                    st.subheader("📅 Customer Appointments")
+                    appointments = session.sql(f"""
+                        SELECT a.*, e.ename as technician_name 
+                        FROM appointments a
+                        JOIN employees e ON a.technicianid = e.employeeid
+                        WHERE a.customerid = '{customer_dict['CUSTOMERID']}'
+                        ORDER BY a.scheduled_time DESC
+                    """).collect()
+                    
+                    if appointments:
+                        for appt in appointments:
+                            try:
+                                appt_dict = appt.as_dict() if hasattr(appt, 'as_dict') else dict(zip(appt._fields, appt))
+                                with st.expander(f"{appt_dict['SCHEDULED_TIME'].strftime('%Y-%m-%d %I:%M %p')} - {appt_dict['SERVICE_TYPE']} ({appt_dict['STA_TUS']})"):
+                                    st.write(f"**Technician:** {appt_dict['TECHNICIAN_NAME']}")
+                                    st.write(f"**Service Type:** {appt_dict['SERVICE_TYPE']}")
+                                    st.write(f"**Status:** {appt_dict['STA_TUS']}")
+                                    if appt_dict.get('NOTES'):
+                                        st.write(f"**Notes:** {appt_dict['NOTES']}")
+                            except:
+                                pass
+                    else:
+                        st.info("No appointments scheduled for this customer")
+                    
+                    # Equipment Information
+                    st.subheader("Equipment Information")
+                    # ... [rest of equipment info display remains the same] ...
                     
                     # Action buttons
-                    if st.button("Edit", key=f"edit_{customer['CUSTOMERID']}"):
-                        st.session_state['edit_customer'] = customer['CUSTOMERID']
-                        st.session_state['customer_to_edit'] = customer
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        if st.button("Edit", key=f"edit_{customer_dict['CUSTOMERID']}"):
+                            st.session_state['edit_customer'] = customer_dict['CUSTOMERID']
+                            st.session_state['customer_to_edit'] = customer_dict
+                            st.rerun()
+                    with col2:
+                        if st.button("Schedule Appointment", key=f"appt_{customer_dict['CUSTOMERID']}"):
+                            st.session_state['selected_customer_id'] = customer_dict['CUSTOMERID']
+                            st.session_state['selected_customer_name'] = customer_dict['NAME']
+                            st.rerun()
+                    with col3:
+                        if st.button("Upload Picture", key=f"pic_{customer_dict['CUSTOMERID']}"):
+                            st.session_state['add_picture_customer'] = customer_dict['CUSTOMERID']
+                            st.rerun()
+
+
+    # --- Add Unit Picture Section ---
+    if 'add_picture_customer' in st.session_state:
+        st.subheader(f"Add Unit Picture for Customer {st.session_state['add_picture_customer']}")
+        
+        uploaded_file = st.file_uploader("Upload picture of the HVAC unit", type=['jpg', 'jpeg', 'png'])
+        description = st.text_input("Picture Description")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Save Picture"):
+                if uploaded_file:
+                    try:
+                        file_data = uploaded_file.read()
+                        encoded_file = base64.b64encode(file_data).decode('utf-8')
+                        session.sql(f"""
+                            INSERT INTO customer_documents 
+                            (DOC_ID, CUSTOMERID, DOC_TYPE, DESCRIPTION, DOC_DATA)
+                            VALUES (
+                                'DOC{datetime.now().timestamp()}',
+                                '{st.session_state['add_picture_customer']}',
+                                'IMAGE',
+                                '{description.replace("'", "''")}',
+                                '{encoded_file}'
+                            )
+                        """).collect()
+                        st.success("Picture added successfully!")
+                        del st.session_state['add_picture_customer']
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error saving picture: {str(e)}")
+                else:
+                    st.error("Please select a file to upload")
+        with col2:
+            if st.button("Cancel"):
+                del st.session_state['add_picture_customer']
+                st.rerun()
+
+    # --- Appointment Scheduling Section ---
+    if 'selected_customer_id' in st.session_state and 'selected_customer_name' in st.session_state:
+        st.subheader(f"📅 Schedule Appointment for {st.session_state['selected_customer_name']}")
+        
+        # Service type selection
+        request_type = st.selectbox(
+            "Select Request Type",
+            ["Repair", "Maintenance", "Install", "Estimate"],
+            index=0
+        )
+        
+        # Urgent request
+        is_urgent = st.radio("Urgent?", ["No", "Yes"], horizontal=True)
+        
+        # Get qualified technicians
+        expertise_map = {
+            "Repair": "EX1", 
+            "Maintenance": "EX2", 
+            "Install": "EX3", 
+            "Estimate": "EX4"
+        }
+        technicians = session.sql(f"""
+            SELECT e.employeeid, e.ename 
+            FROM employees e
+            JOIN employee_expertise ee ON e.employeeid = ee.employeeid
+            WHERE ee.expertiseid = '{expertise_map[request_type]}'
+        """).collect()
+        
+        if not technicians:
+            st.error("No technicians available for this service type")
+        else:
+            if request_type == "Install":
+                # Full-day booking for installations
+                st.subheader("Select Installation Date")
+                
+                # Show 4 weeks of available dates
+                start_date = datetime.now().date()
+                dates = [start_date + timedelta(days=i) for i in range(28)]
+                
+                # Get already booked installation days
+                booked_days = session.sql(f"""
+                    SELECT DISTINCT DATE(scheduled_time) as day 
+                    FROM appointments 
+                    WHERE service_type = 'Install'
+                    AND DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=28)}'
+                """).collect()
+                booked_days = [row['DAY'] for row in booked_days]
+                
+                # Display available dates
+                cols = st.columns(7)
+                for i, date in enumerate(dates):
+                    with cols[i % 7]:
+                        if date in booked_days:
+                            st.button(
+                                f"{date.strftime('%a %m/%d')}",
+                                disabled=True,
+                                key=f"install_day_{date}"
+                            )
+                        else:
+                            if st.button(
+                                f"{date.strftime('%a %m/%d')}",
+                                key=f"install_day_{date}"
+                            ):
+                                st.session_state.selected_install_date = date
+                
+                # Handle installation booking
+                if 'selected_install_date' in st.session_state:
+                    date = st.session_state.selected_install_date
+                    st.success(f"Selected installation date: {date.strftime('%A, %B %d')}")
+                    
+                    # Select primary technician
+                    primary_tech = st.selectbox(
+                        "Primary Technician",
+                        options=[t['EMPLOYEEID'] for t in technicians],
+                        format_func=lambda x: next(t['ENAME'] for t in technicians if t['EMPLOYEEID'] == x))
+                    
+                    # Select secondary technician (optional)
+                    secondary_techs = [t for t in technicians if t['EMPLOYEEID'] != primary_tech]
+                    secondary_tech = st.selectbox(
+                        "Additional Technician (Optional)",
+                        options=[""] + [t['EMPLOYEEID'] for t in secondary_techs],
+                        format_func=lambda x: next(t['ENAME'] for t in technicians if t['EMPLOYEEID'] == x) if x else "None"
+                    )
+                    
+                    notes = st.text_area("Installation Notes")
+                    if is_urgent == "Yes":
+                        notes = "URGENT: " + notes
+                    
+                    if st.button("Book Installation"):
+                        try:
+                            # Book primary technician for full day (8AM-5PM)
+                            session.sql(f"""
+                                INSERT INTO appointments (
+                                    appointmentid, customerid, technicianid,
+                                    scheduled_time, service_type, notes, sta_tus
+                                ) VALUES (
+                                    'APT{datetime.now().timestamp()}',
+                                    '{st.session_state['selected_customer_id']}',
+                                    '{primary_tech}',
+                                    '{datetime.combine(date, time(8,0))}',
+                                    'Install',
+                                    '{notes.replace("'", "''")}',
+                                    'scheduled'
+                                )
+                            """).collect()
+                            
+                            # Book secondary technician if selected
+                            if secondary_tech:
+                                session.sql(f"""
+                                    INSERT INTO appointments (
+                                        appointmentid, customerid, technicianid,
+                                        scheduled_time, service_type, notes, sta_tus
+                                    ) VALUES (
+                                        'APT{datetime.now().timestamp()}',
+                                        '{st.session_state['selected_customer_id']}',
+                                        '{secondary_tech}',
+                                        '{datetime.combine(date, time(8,0))}',
+                                        'Install-Assist',
+                                        '{notes.replace("'", "''")}',
+                                        'scheduled'
+                                    )
+                                """).collect()
+                            
+                            st.success(f"Installation booked for {date.strftime('%A, %B %d')}!")
+                            del st.session_state.selected_install_date
+                            del st.session_state['selected_customer_id']
+                            del st.session_state['selected_customer_name']
+                            st.rerun()
+                        
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+            
+            else:
+                # Standard 2-hour slots for non-installation services
+                st.subheader("Select Appointment Time")
+                
+                # Week navigation
+                today = datetime.now().date()
+                if 'week_offset' not in st.session_state:
+                    st.session_state.week_offset = 0
+                
+                col1, col2, col3 = st.columns([2,1,1])
+                with col1:
+                    st.write(f"Week of {(today + timedelta(weeks=st.session_state.week_offset)).strftime('%B %d')}")
+                with col2:
+                    if st.button("◀ Previous Week"):
+                        st.session_state.week_offset -= 1
+                        st.rerun()
+                with col3:
+                    if st.button("Next Week ▶"):
+                        st.session_state.week_offset += 1
+                        st.rerun()
+                
+                start_date = today + timedelta(weeks=st.session_state.week_offset) - timedelta(days=today.weekday())
+                days = [start_date + timedelta(days=i) for i in range(7)]
+                
+                # Get existing appointments
+                appointments = session.sql(f"""
+                    SELECT * FROM appointments
+                    WHERE DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
+                    AND sta_tus != 'cancelled'
+                """).collect()
+                
+                # Create calendar with 2-hour slots (8AM-6PM)
+                time_slots = [time(hour) for hour in range(8, 19, 2)]  # 8AM, 10AM, 12PM, 2PM, 4PM, 6PM
+                
+                for day in days:
+                    with st.expander(day.strftime("%A %m/%d"), expanded=True):
+                        cols = st.columns(len(time_slots))
+                        
+                        for i, time_slot in enumerate(time_slots):
+                            slot_start = datetime.combine(day, time_slot)
+                            slot_end = slot_start + timedelta(hours=2)
+                            
+                            with cols[i]:
+                                # Check technician availability
+                                available_techs = []
+                                for tech in technicians:
+                                    tech_id = tech['EMPLOYEEID']
+                                    
+                                    # Check for overlapping appointments
+                                    is_busy = any(
+                                        a for a in appointments 
+                                        if a['TECHNICIANID'] == tech_id
+                                        and datetime.combine(day, a['SCHEDULED_TIME'].time()) < slot_end
+                                        and (datetime.combine(day, a['SCHEDULED_TIME'].time()) + timedelta(hours=2)) > slot_start
+                                    )
+                                    
+                                    if not is_busy:
+                                        available_techs.append(tech)
+                                
+                                # Display time slot (8-10 format)
+                                slot_label = f"{time_slot.hour}-{(time_slot.hour+2)%12 or 12}"
+                                
+                                if available_techs:
+                                    if st.button(
+                                        slot_label,
+                                        key=f"slot_{day}_{time_slot}",
+                                        help="Available: " + ", ".join([t['ENAME'].split()[0] for t in available_techs])
+                                    ):
+                                        st.session_state.selected_slot = {
+                                            'datetime': slot_start,
+                                            'techs': available_techs
+                                        }
+                                        st.rerun()
+                                else:
+                                    st.button(
+                                        slot_label,
+                                        disabled=True,
+                                        key=f"slot_{day}_{time_slot}_disabled"
+                                    )
+                
+                # Handle slot selection for non-install services
+                if 'selected_slot' in st.session_state:
+                    slot = st.session_state.selected_slot
+                    time_range = f"{slot['datetime'].hour}-{slot['datetime'].hour+2}"
+                    st.success(f"Selected: {slot['datetime'].strftime('%A %m/%d')} {time_range}")
+                    
+                    # Primary technician selection
+                    primary_tech = st.selectbox(
+                        "Primary Technician",
+                        options=[t['EMPLOYEEID'] for t in slot['techs']],
+                        format_func=lambda x: next(t['ENAME'] for t in slot['techs'] if t['EMPLOYEEID'] == x))
+                    
+                    # Secondary technician selection (optional)
+                    secondary_techs = [t for t in slot['techs'] if t['EMPLOYEEID'] != primary_tech]
+                    secondary_tech = st.selectbox(
+                        "Additional Technician (Optional)",
+                        options=[""] + [t['EMPLOYEEID'] for t in secondary_techs],
+                        format_func=lambda x: next(t['ENAME'] for t in slot['techs'] if t['EMPLOYEEID'] == x) if x else "None"
+                    )
+                    
+                    notes = st.text_area("Service Notes")
+                    if is_urgent == "Yes":
+                        notes = "URGENT: " + notes
+                    
+                    if st.button("Book Appointment"):
+                        try:
+                            # Check availability again
+                            existing = session.sql(f"""
+                                SELECT * FROM appointments
+                                WHERE technicianid = '{primary_tech}'
+                                AND DATE(scheduled_time) = '{slot['datetime'].date()}'
+                                AND HOUR(scheduled_time) = {slot['datetime'].hour}
+                                AND sta_tus != 'cancelled'
+                            """).collect()
+                            
+                            if existing:
+                                st.error("Time slot no longer available")
+                                del st.session_state.selected_slot
+                                st.rerun()
+                            
+                            # Book primary technician
+                            session.sql(f"""
+                                INSERT INTO appointments (
+                                    appointmentid, customerid, technicianid, 
+                                    scheduled_time, service_type, notes, sta_tus
+                                ) VALUES (
+                                    'APT{datetime.now().timestamp()}',
+                                    '{st.session_state['selected_customer_id']}',
+                                    '{primary_tech}',
+                                    '{slot['datetime']}',
+                                    '{request_type}',
+                                    '{notes.replace("'", "''")}',
+                                    'scheduled'
+                                )
+                            """).collect()
+                            
+                            # Book secondary technician if selected
+                            if secondary_tech:
+                                session.sql(f"""
+                                    INSERT INTO appointments (
+                                        appointmentid, customerid, technicianid, 
+                                        scheduled_time, service_type, notes, sta_tus
+                                    ) VALUES (
+                                        'APT{datetime.now().timestamp()}',
+                                        '{st.session_state['selected_customer_id']}',
+                                        '{secondary_tech}',
+                                        '{slot['datetime']}',
+                                        '{request_type}-Assist',
+                                        '{notes.replace("'", "''")}',
+                                        'scheduled'
+                                    )
+                                """).collect()
+                            
+                            st.success(f"Appointment booked for {time_range}!")
+                            del st.session_state.selected_slot
+                            del st.session_state['selected_customer_id']
+                            del st.session_state['selected_customer_name']
+                            st.rerun()
+                        
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+        
+        if st.button("Back to Customer List"):
+            if 'selected_install_date' in st.session_state:
+                del st.session_state.selected_install_date
+            if 'selected_slot' in st.session_state:
+                del st.session_state.selected_slot
+            del st.session_state['selected_customer_id']
+            del st.session_state['selected_customer_name']
+            st.rerun()
 
     # --- Edit Customer Form ---
     if 'edit_customer' in st.session_state and 'customer_to_edit' in st.session_state:
@@ -1029,27 +1811,30 @@ def customer_management():
         customer_to_edit = st.session_state['customer_to_edit']
         
         st.subheader("✏️ Edit Customer")
-        with st.form("edit_customer_form"):
+        form_key = "edit_customer_form"
+        with st.form(key=form_key):
             col1, col2 = st.columns(2)
             
             with col1:
                 name = st.text_input("Full Name*", value=customer_to_edit['NAME'])
                 phone = st.text_input("Phone*", value=customer_to_edit['PHONE'])
-                email = st.text_input("Email", value=customer_to_edit['EMAIL'] or "")
-                address = st.text_input("Address*", value=customer_to_edit['ADDRESS'])
+                email = st.text_input("Email", value=customer_to_edit.get('EMAIL', ''))
+                address = st.text_input("Street Address*", value=customer_to_edit['ADDRESS'])
+                unit = st.text_input("Unit/Apt", value=customer_to_edit.get('UNIT', ''))
                 
             with col2:
-                # Parse how_heard value safely
-                how_heard_value = customer_to_edit.get('HOW_HEARD', '') or ''
-                if isinstance(how_heard_value, str):
-                    if ":" in how_heard_value:
-                        how_heard = how_heard_value.split(":")[0].strip()
-                        friend_name = how_heard_value.split(":")[1].strip() if how_heard == "Friend" else ""
-                    else:
-                        how_heard = how_heard_value
-                        friend_name = ""
+                city = st.text_input("City*", value=customer_to_edit['CITY'])
+                state = st.selectbox("State*", ["MD", "DC", "VA"], 
+                                   index=["MD", "DC", "VA"].index(customer_to_edit['STATE']))
+                zipcode = st.text_input("Zip Code*", value=customer_to_edit['ZIPCODE'])
+                
+                # Parse how_heard value
+                how_heard_value = customer_to_edit.get('HOW_HEARD', '')
+                if isinstance(how_heard_value, str) and ":" in how_heard_value:
+                    how_heard = how_heard_value.split(":")[0].strip()
+                    friend_name = how_heard_value.split(":")[1].strip() if how_heard == "Friend" else ""
                 else:
-                    how_heard = ""
+                    how_heard = how_heard_value
                     friend_name = ""
                 
                 # How Heard section
@@ -1060,91 +1845,138 @@ def customer_management():
                 )
                 
                 # Show friend name field only if "Friend" is selected
-                edit_friend_name = ""
                 if how_heard == "Friend":
-                    edit_friend_name = st.text_input("Friend's Name*", value=friend_name)
-                
-                # Lock Box section
+                    friend_name = st.text_input("Friend's Name*", value=friend_name)
+            
+            # Lock Box and Safety Alarm section
+            col1, col2 = st.columns(2)
+            with col1:
                 has_lock_box = st.radio(
                     "Lock Box", 
                     ["No", "Yes"], 
-                    horizontal=True,
-                    index=1 if customer_to_edit.get('HAS_LOCK_BOX', False) else 0
+                    index=1 if customer_to_edit.get('HAS_LOCK_BOX') == 'Yes' else 0,
+                    horizontal=True
                 )
-                
-                # Show code input if Lock Box is Yes
                 lock_box_code = ""
                 if has_lock_box == "Yes":
                     lock_box_code = st.text_input("Lock Box Code*", value=customer_to_edit.get('LOCK_BOX_CODE', ''))
+            
+            with col2:
+                has_safety_alarm = st.radio(
+                    "Safety Alarm", 
+                    ["No", "Yes"], 
+                    index=1 if customer_to_edit.get('HAS_SAFETY_ALARM') == 'Yes' else 0,
+                    horizontal=True
+                )
+                safety_alarm_code = ""
+                if has_safety_alarm == "Yes":
+                    safety_alarm_code = st.text_input("Safety Alarm Code*", value=customer_to_edit.get('SAFETY_ALARM', ''))
+            
+            # Equipment Information
+            st.subheader("Equipment Information")
+            col1, col2 = st.columns(2)
+            with col1:
+                outdoor_unit_model = st.text_input("Outdoor Unit Model", value=customer_to_edit.get('OUTDOOR_UNIT_MODEL', ''))
+                outdoor_unit_serial = st.text_input("Outdoor Unit Serial Number", value=customer_to_edit.get('OUTDOOR_UNIT_SERIAL_NUMBER', ''))
+                indoor_unit_model = st.text_input("Indoor Unit Model", value=customer_to_edit.get('INDOOR_UNIT_MODEL', ''))
+                indoor_unit_serial = st.text_input("Indoor Unit Serial Number", value=customer_to_edit.get('INDOOR_UNIT_SERIAL_NUMBER', ''))
                 
-                note = st.text_area("Note", value=customer_to_edit.get('NOTE', ''))
+            with col2:
+                thermostat_type = st.text_input("Thermostat Type", value=customer_to_edit.get('THERMOSTAT_TYPE', ''))
+                unit_location = st.selectbox(
+                    "Unit Location",
+                    ["Attic", "Basement", "Garage", "Closet", "Crawlspace", "Other"],
+                    index=["Attic", "Basement", "Garage", "Closet", "Crawlspace", "Other"].index(
+                        customer_to_edit.get('UNIT_LOCATION', 'Attic'))
+                )
+                accessibility_level = st.selectbox(
+                    "Accessibility Level",
+                    ["Easy", "Moderate", "Difficult", "Very Difficult"],
+                    index=["Easy", "Moderate", "Difficult", "Very Difficult"].index(
+                        customer_to_edit.get('ACCESSIBILITY_LEVEL', 'Easy'))
+                )
             
-            # Description/notes
-            description = st.text_area("Customer Request", value=customer_to_edit.get('REQUEST', ''))
+            # Notes section
+            note = st.text_area("General Notes", value=customer_to_edit.get('NOTE', ''))
+            entrance_note = st.text_area("Entrance Notes", value=customer_to_edit.get('ENTRANCE_NOTE', ''))
             
-            # Form submit button
-            submitted = st.form_submit_button("💾 Save Changes")
+            # Form actions
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.form_submit_button("💾 Save Changes"):
+                    # Validate inputs
+                    if not all([name, phone, address, city, state, zipcode]):
+                        st.error("Please fill in all required fields (*)")
+                    elif not re.match(r"^\d{3}-\d{3}-\d{4}$", phone):
+                        st.error("Invalid phone number format. Please use ###-###-####")
+                    elif has_lock_box == "Yes" and not lock_box_code:
+                        st.error("Please enter Lock Box Code when Lock Box is set to Yes")
+                    elif has_safety_alarm == "Yes" and not safety_alarm_code:
+                        st.error("Please enter Safety Alarm Code when Safety Alarm is set to Yes")
+                    elif how_heard == "Friend" and not friend_name:
+                        st.error("Please enter Friend's Name when referral is from a friend")
+                    else:
+                        try:
+                            # Prepare how_heard value
+                            how_heard_value = how_heard
+                            if how_heard == "Friend":
+                                how_heard_value = f"Friend: {friend_name}"
+                            
+                            # Prepare SQL values with proper escaping
+                            email_escaped = email.replace("'", "''") if email else None
+                            unit_escaped = unit.replace("'", "''") if unit else None
+                            lock_box_code_escaped = lock_box_code.replace("'", "''") if has_lock_box == "Yes" and lock_box_code else None
+                            safety_alarm_code_escaped = safety_alarm_code.replace("'", "''") if has_safety_alarm == "Yes" and safety_alarm_code else None
+                            how_heard_value_escaped = how_heard_value.replace("'", "''") if how_heard_value else None
+                            note_escaped = note.replace("'", "''") if note else None
+                            entrance_note_escaped = entrance_note.replace("'", "''") if entrance_note else None
+                            
+                            # Update customer record with all equipment info
+                            update_query = f"""
+                                UPDATE customers 
+                                SET NAME = '{name.replace("'", "''")}',
+                                    PHONE = '{phone.replace("'", "''")}',
+                                    EMAIL = {f"'{email_escaped}'" if email else 'NULL'},
+                                    ADDRESS = '{address.replace("'", "''")}',
+                                    UNIT = {f"'{unit_escaped}'" if unit else 'NULL'},
+                                    CITY = '{city.replace("'", "''")}',
+                                    STATE = '{state}',
+                                    ZIPCODE = '{zipcode}',
+                                    HAS_LOCK_BOX = '{has_lock_box}',
+                                    LOCK_BOX_CODE = {f"'{lock_box_code_escaped}'" if has_lock_box == "Yes" and lock_box_code else 'NULL'},
+                                    HAS_SAFETY_ALARM = '{has_safety_alarm}',
+                                    SAFETY_ALARM = {f"'{safety_alarm_code_escaped}'" if has_safety_alarm == "Yes" and safety_alarm_code else 'NULL'},
+                                    HOW_HEARD = {f"'{how_heard_value_escaped}'" if how_heard_value else 'NULL'},
+                                    NOTE = {f"'{note_escaped}'" if note else 'NULL'},
+                                    ENTRANCE_NOTE = {f"'{entrance_note_escaped}'" if entrance_note else 'NULL'},
+                                    OUTDOOR_UNIT_MODEL = '{outdoor_unit_model.replace("'", "''")}',
+                                    OUTDOOR_UNIT_SERIAL_NUMBER = '{outdoor_unit_serial.replace("'", "''")}',
+                                    INDOOR_UNIT_MODEL = '{indoor_unit_model.replace("'", "''")}',
+                                    INDOOR_UNIT_SERIAL_NUMBER = '{indoor_unit_serial.replace("'", "''")}',
+                                    THERMOSTAT_TYPE = '{thermostat_type.replace("'", "''")}',
+                                    UNIT_LOCATION = '{unit_location}',
+                                    ACCESSIBILITY_LEVEL = '{accessibility_level}'
+                                WHERE CUSTOMERID = '{edit_customer_id}'
+                            """
+                            
+                            session.sql(update_query).collect()
+                            st.success("Customer updated successfully!")
+                            del st.session_state['edit_customer']
+                            del st.session_state['customer_to_edit']
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error updating customer: {str(e)}")
             
-            if submitted:
-                # Validate inputs
-                if not all([name, phone, address]):
-                    st.error("Please fill in all required fields (*)")
-                elif not re.match(r"^\d{3}-\d{3}-\d{4}$", phone):
-                    st.error("Invalid phone number format. Please use ###-###-####")
-                elif has_lock_box == "Yes" and not lock_box_code:
-                    st.error("Please enter Lock Box Code when Lock Box is set to Yes")
-                elif how_heard == "Friend" and not edit_friend_name:
-                    st.error("Please enter Friend's Name when referral is from a friend")
-                else:
-                    try:
-                        # Prepare how_heard value
-                        how_heard_value = how_heard
-                        if how_heard == "Friend":
-                            how_heard_value = f"Friend: {edit_friend_name}"
-                        
-                        # Prepare SQL values with proper escaping
-                        email_escaped = email.replace("'", "''") if email else None
-                        lock_box_code_escaped = lock_box_code.replace("'", "''") if lock_box_code else None
-                        how_heard_value_escaped = how_heard_value.replace("'", "''") if how_heard_value else None
-                        note_escaped = note.replace("'", "''") if note else None
-                        description_escaped = description.replace("'", "''") if description else None
-                        
-                        # Update customer record
-                        update_query = f"""
-                            UPDATE customers 
-                            SET NAME = '{name.replace("'", "''")}',
-                                PHONE = '{phone.replace("'", "''")}',
-                                EMAIL = {f"'{email_escaped}'" if email else 'NULL'},
-                                ADDRESS = '{address.replace("'", "''")}',
-                                HAS_LOCK_BOX = {'TRUE' if has_lock_box == 'Yes' else 'FALSE'},
-                                LOCK_BOX_CODE = {f"'{lock_box_code_escaped}'" if lock_box_code else 'NULL'},
-                                HOW_HEARD = {f"'{how_heard_value_escaped}'" if how_heard_value else 'NULL'},
-                                NOTE = {f"'{note_escaped}'" if note else 'NULL'},
-                                REQUEST = {f"'{description_escaped}'" if description else 'NULL'}
-                            WHERE CUSTOMERID = '{edit_customer_id}'
-                        """
-                        
-                        session.sql(update_query).collect()
-                        st.success("Customer updated successfully!")
-                        del st.session_state['edit_customer']
-                        del st.session_state['customer_to_edit']
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error updating customer: {str(e)}")
-            
-            # Cancel button
-            if st.button("❌ Cancel"):
-                del st.session_state['edit_customer']
-                del st.session_state['customer_to_edit']
-                st.rerun()
+            with col2:
+                if st.form_submit_button("❌ Cancel"):
+                    del st.session_state['edit_customer']
+                    del st.session_state['customer_to_edit']
+                    st.rerun()
+        
+        
+        
+############################################################
 #######################################################################
-#######################################################################
-#######################################################################
-#######################################################################
-######################################################################
-
-#Appointment 
-
 def appointments():
     st.subheader("📅 Appointment Scheduling")
     session = get_session()
@@ -1153,13 +1985,20 @@ def appointments():
     st.subheader("1. Select Customer")
     search_query = st.text_input("Search by Name, Phone, Email, or Address", key="customer_search")
     
-    # Fetch customers
-    customers = session.sql(f"""
-        SELECT customerid, name, phone FROM customers 
-        {'WHERE NAME ILIKE ' + f"'%{search_query}%'" if search_query else ''}
-        ORDER BY name
-    """).collect()
-    
+    # Fetch customers with error handling
+    try:
+        customers = session.sql(f"""
+            SELECT customerid, name, phone FROM customers 
+            WHERE NAME ILIKE '%{search_query}%' 
+               OR PHONE ILIKE '%{search_query}%'
+               OR EMAIL ILIKE '%{search_query}%'
+               OR ADDRESS ILIKE '%{search_query}%'
+            ORDER BY name
+        """).collect()
+    except Exception as e:
+        st.error(f"Database error: {str(e)}")
+        return
+
     if not customers:
         st.warning("No customers found")
         return
@@ -1174,21 +2013,29 @@ def appointments():
     st.subheader("2. Service Request")
     request_type = st.selectbox(
         "Select Request Type",
-        ["Install", "Service", "Estimate"],
+        ["Repair", "Maintenance", "Install", "Estimate"],
         index=0
     )
 
-    # Get qualified technicians
-    expertise_map = {"Install": "EX1", "Service": "EX2", "Estimate": "EX3"}
-    technicians = session.sql(f"""
-        SELECT e.employeeid, e.ename 
-        FROM employees e
-        JOIN employee_expertise ee ON e.employeeid = ee.employeeid
-        WHERE ee.expertiseid = '{expertise_map[request_type]}'
-    """).collect()
+    # Get qualified technicians with error handling
     
+    try:
+        expertise_map = {"Repair": "EX1", 
+            "Maintenance": "EX2", 
+            "Install": "EX3", 
+            "Estimate": "EX4"}
+        technicians = session.sql(f"""
+            SELECT e.employeeid, e.ename 
+            FROM employees e
+            JOIN employee_expertise ee ON e.employeeid = ee.employeeid
+            WHERE ee.expertiseid = '{expertise_map[request_type]}'
+        """).collect()
+    except Exception as e:
+        st.error(f"Error loading technicians: {str(e)}")
+        return
+
     if not technicians:
-        st.error("No technicians available")
+        st.error("No qualified technicians available for this service type")
         return
 
     # --- Different Logic for Install vs Other Services ---
@@ -1200,28 +2047,33 @@ def appointments():
         start_date = datetime.now().date()
         dates = [start_date + timedelta(days=i) for i in range(28)]
         
-        # Get already booked installation days
-        booked_days = session.sql(f"""
-            SELECT DISTINCT DATE(scheduled_time) as day 
-            FROM appointments 
-            WHERE service_type = 'Install'
-            AND DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=28)}'
-        """).collect()
-        booked_days = [row['DAY'] for row in booked_days]
-        
-        # Display available dates
+        # Get booked installation days
+        try:
+            booked_days = session.sql(f"""
+                SELECT DISTINCT DATE(scheduled_time) as day 
+                FROM appointments 
+                WHERE service_type = 'Install'
+                AND DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=28)}'
+            """).collect()
+            booked_days = [row['DAY'] for row in booked_days]
+        except Exception as e:
+            st.error(f"Error checking availability: {str(e)}")
+            return
+
+        # Display calendar grid
+        st.write("### Available Dates")
         cols = st.columns(7)
         for i, date in enumerate(dates):
             with cols[i % 7]:
                 if date in booked_days:
                     st.button(
-                        f"{date.strftime('%a %m/%d')}",
+                        f"{date.strftime('%m/%d')}",
                         disabled=True,
                         key=f"install_day_{date}"
                     )
                 else:
                     if st.button(
-                        f"{date.strftime('%a %m/%d')}",
+                        f"{date.strftime('%m/%d')}",
                         key=f"install_day_{date}"
                     ):
                         st.session_state.selected_install_date = date
@@ -1231,26 +2083,39 @@ def appointments():
             date = st.session_state.selected_install_date
             st.success(f"Selected installation date: {date.strftime('%A, %B %d')}")
             
-            # Select primary technician
+            # Technician selection
             primary_tech = st.selectbox(
                 "Primary Technician",
                 options=[t['EMPLOYEEID'] for t in technicians],
-                format_func=lambda x: next(t['ENAME'] for t in technicians if t['EMPLOYEEID'] == x)
+                format_func=lambda x: next(t['ENAME'] for t in technicians if t['EMPLOYEEID'] == x),
+                key="primary_install_tech"
             )
             
-            # Select secondary technician (optional)
             secondary_techs = [t for t in technicians if t['EMPLOYEEID'] != primary_tech]
             secondary_tech = st.selectbox(
                 "Additional Technician (Optional)",
                 options=[""] + [t['EMPLOYEEID'] for t in secondary_techs],
-                format_func=lambda x: next(t['ENAME'] for t in technicians if t['EMPLOYEEID'] == x) if x else "None"
+                format_func=lambda x: next(t['ENAME'] for t in technicians if t['EMPLOYEEID'] == x) if x else "None",
+                key="secondary_install_tech"
             )
             
             notes = st.text_area("Installation Notes")
             
             if st.button("Book Installation"):
                 try:
-                    # Book primary technician for full day (8AM-5PM)
+                    # Check availability again
+                    existing = session.sql(f"""
+                        SELECT 1 FROM appointments
+                        WHERE technicianid = '{primary_tech}'
+                        AND DATE(scheduled_time) = '{date}'
+                        LIMIT 1
+                    """).collect()
+                    
+                    if existing:
+                        st.error("Technician no longer available")
+                        st.rerun()
+                    
+                    # Book primary technician
                     session.sql(f"""
                         INSERT INTO appointments (
                             appointmentid, customerid, technicianid,
@@ -1261,7 +2126,7 @@ def appointments():
                             '{primary_tech}',
                             '{datetime.combine(date, time(8,0))}',
                             'Install',
-                            '{notes}',
+                            '{notes.replace("'", "''")}',
                             'scheduled'
                         )
                     """).collect()
@@ -1278,7 +2143,7 @@ def appointments():
                                 '{secondary_tech}',
                                 '{datetime.combine(date, time(8,0))}',
                                 'Install-Assist',
-                                '{notes}',
+                                '{notes.replace("'", "''")}',
                                 'scheduled'
                             )
                         """).collect()
@@ -1314,15 +2179,19 @@ def appointments():
         start_date = today + timedelta(weeks=st.session_state.week_offset) - timedelta(days=today.weekday())
         days = [start_date + timedelta(days=i) for i in range(7)]
         
-        # Get existing appointments
-        appointments = session.sql(f"""
-            SELECT * FROM appointments
-            WHERE DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
-            AND sta_tus != 'cancelled'
-        """).collect()
-        
         # Create calendar with 2-hour slots (8AM-6PM)
-        time_slots = [time(hour) for hour in range(8, 19, 2)]  # 8AM, 10AM, 12PM, 2PM, 4PM, 6PM
+        time_slots = [time(hour) for hour in range(8, 19, 2)]
+        
+        # Get existing appointments
+        try:
+            appointments = session.sql(f"""
+                SELECT * FROM appointments
+                WHERE DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
+                AND sta_tus != 'cancelled'
+            """).collect()
+        except Exception as e:
+            st.error(f"Error loading appointments: {str(e)}")
+            return
         
         for day in days:
             with st.expander(day.strftime("%A %m/%d"), expanded=True):
@@ -1333,35 +2202,52 @@ def appointments():
                     slot_end = slot_start + timedelta(hours=2)
                     
                     with cols[i]:
-                        # Check technician availability
                         available_techs = []
                         for tech in technicians:
                             tech_id = tech['EMPLOYEEID']
                             
-                            # Check for overlapping appointments
-                            is_busy = any(
-                                a for a in appointments 
-                                if a['TECHNICIANID'] == tech_id
-                                and datetime.combine(day, a['SCHEDULED_TIME'].time()) < slot_end
-                                and (datetime.combine(day, a['SCHEDULED_TIME'].time()) + timedelta(hours=2)) > slot_start
-                            )
-                            
-                            if not is_busy:
-                                available_techs.append(tech)
+                            try:
+                                # Check schedule availability
+                                schedule_available = session.sql(f"""
+                                    SELECT 1 FROM employee_schedules
+                                    WHERE employeeid = '{tech_id}'
+                                    AND schedule_date = '{day}'
+                                    AND start_time <= '{time_slot}'
+                                    AND end_time >= '{(time_slot.hour + 2) % 24}:{time_slot.minute}'
+                                    LIMIT 1
+                                """).collect()
+                                
+                                # Check appointment conflicts
+                                appointment_conflict = session.sql(f"""
+                                    SELECT 1 FROM appointments
+                                    WHERE technicianid = '{tech_id}'
+                                    AND scheduled_time >= '{slot_start}'
+                                    AND scheduled_time < '{slot_end}'
+                                    AND sta_tus != 'cancelled'
+                                    LIMIT 1
+                                """).collect()
+                                
+                                if schedule_available and not appointment_conflict:
+                                    available_techs.append(tech)
+                            except Exception as e:
+                                st.error(f"Error checking availability: {str(e)}")
+                                continue
                         
-                        # Display time slot (8-10 format)
                         slot_label = f"{time_slot.hour}-{(time_slot.hour+2)%12 or 12}"
                         
                         if available_techs:
                             if st.button(
                                 slot_label,
                                 key=f"slot_{day}_{time_slot}",
-                                help="Available: " + ", ".join([t['ENAME'].split()[0] for t in available_techs])
+                                help=f"Available: {len(available_techs)} techs",
+                                on_click=lambda d=day, ts=time_slot: st.session_state.update({
+                                    'selected_slot': {
+                                        'datetime': datetime.combine(d, ts),
+                                        'techs': available_techs
+                                    }
+                                })
                             ):
-                                st.session_state.selected_slot = {
-                                    'datetime': slot_start,
-                                    'techs': available_techs
-                                }
+                                pass
                         else:
                             st.button(
                                 slot_label,
@@ -1369,46 +2255,46 @@ def appointments():
                                 key=f"slot_{day}_{time_slot}_disabled"
                             )
         
-        # Handle slot selection for non-install services
+        # Handle slot selection
         if 'selected_slot' in st.session_state:
             slot = st.session_state.selected_slot
             time_range = f"{slot['datetime'].hour}-{slot['datetime'].hour+2}"
             st.success(f"Selected: {slot['datetime'].strftime('%A %m/%d')} {time_range}")
             
-            # Primary technician selection
+            # Technician selection
             primary_tech = st.selectbox(
                 "Primary Technician",
                 options=[t['EMPLOYEEID'] for t in slot['techs']],
-                format_func=lambda x: next(t['ENAME'] for t in slot['techs'] if t['EMPLOYEEID'] == x)
+                format_func=lambda x: next(t['ENAME'] for t in slot['techs'] if t['EMPLOYEEID'] == x),
+                key=f"primary_{slot['datetime'].timestamp()}"
             )
             
-            # Secondary technician selection (optional)
             secondary_techs = [t for t in slot['techs'] if t['EMPLOYEEID'] != primary_tech]
             secondary_tech = st.selectbox(
                 "Additional Technician (Optional)",
                 options=[""] + [t['EMPLOYEEID'] for t in secondary_techs],
-                format_func=lambda x: next(t['ENAME'] for t in slot['techs'] if t['EMPLOYEEID'] == x) if x else "None"
+                format_func=lambda x: next(t['ENAME'] for t in slot['techs'] if t['EMPLOYEEID'] == x) if x else "None",
+                key=f"secondary_{slot['datetime'].timestamp()}"
             )
             
             notes = st.text_area("Service Notes")
             
             if st.button("Book Appointment"):
                 try:
-                    # Check availability again
+                    # Final availability check
                     existing = session.sql(f"""
-                        SELECT * FROM appointments
+                        SELECT 1 FROM appointments
                         WHERE technicianid = '{primary_tech}'
-                        AND DATE(scheduled_time) = '{slot['datetime'].date()}'
-                        AND HOUR(scheduled_time) = {slot['datetime'].hour}
-                        AND sta_tus != 'cancelled'
+                        AND scheduled_time >= '{slot['datetime']}'
+                        AND scheduled_time < '{slot['datetime'] + timedelta(hours=2)}'
+                        LIMIT 1
                     """).collect()
                     
                     if existing:
                         st.error("Time slot no longer available")
-                        del st.session_state.selected_slot
                         st.rerun()
                     
-                    # Book primary technician
+                    # Create appointment
                     session.sql(f"""
                         INSERT INTO appointments (
                             appointmentid, customerid, technicianid, 
@@ -1419,12 +2305,11 @@ def appointments():
                             '{primary_tech}',
                             '{slot['datetime']}',
                             '{request_type}',
-                            '{notes}',
+                            '{notes.replace("'", "''")}',
                             'scheduled'
                         )
                     """).collect()
                     
-                    # Book secondary technician if selected
                     if secondary_tech:
                         session.sql(f"""
                             INSERT INTO appointments (
@@ -1436,911 +2321,80 @@ def appointments():
                                 '{secondary_tech}',
                                 '{slot['datetime']}',
                                 '{request_type}-Assist',
-                                '{notes}',
+                                '{notes.replace("'", "''")}',
                                 'scheduled'
                             )
                         """).collect()
                     
-                    st.success(f"Appointment booked for {time_range}!")
+                    st.success("Appointment booked successfully!")
                     del st.session_state.selected_slot
                     st.rerun()
                 
                 except Exception as e:
-                    st.error(f"Error: {str(e)}")
+                    st.error(f"Error creating appointment: {str(e)}")
 
     # --- Current Appointments Display ---
-    st.subheader("Current Appointments This Week")
-    current_appts = session.sql(f"""
-        SELECT 
-            a.appointmentid,
-            c.name as customer_name,
-            e.ename as technician_name,
-            a.scheduled_time,
-            a.service_type,
-            a.sta_tus,
-            a.notes
-        FROM appointments a
-        JOIN customers c ON a.customerid = c.customerid
-        JOIN employees e ON a.technicianid = e.employeeid
-        WHERE DATE(a.scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
-        ORDER BY a.scheduled_time
-    """).collect()
-    
-    if current_appts:
-        appt_data = []
-        for appt in current_appts:
-            start = appt['SCHEDULED_TIME']
-            time_range = f"{start.hour}-{start.hour+2}"
-            
-            appt_data.append({
-                "Date": start.strftime('%a %m/%d'),
-                "Time": time_range,
-                "Customer": appt['CUSTOMER_NAME'],
-                "Technician": appt['TECHNICIAN_NAME'],
-                "Service": appt['SERVICE_TYPE'],
-                "Status": appt['STA_TUS']
-            })
-        
-        st.dataframe(
-            pd.DataFrame(appt_data),
-            hide_index=True,
-            use_container_width=True
-        )
-    else:
-        st.info("No appointments scheduled for this week")
-
-
-    
-#######################################################################
-#######################################################################
-def equipment_management():
-    st.subheader("🛠️ ")
-    session = get_session()
-
-    # Search and select a customer
-    st.subheader("Select Customer")
-    search_query = st.text_input("Search by Name or Phone")
-
-    # Fetch customers based on search query
-    if search_query:
-        customers = session.sql(f"""
-            SELECT c.*, cu.* 
-            FROM customers c
-            LEFT JOIN customer_units cu ON c.customerid = cu.customerid
-            WHERE c.NAME ILIKE '%{search_query}%' OR c.PHONE ILIKE '%{search_query}%'
+    st.subheader("📅 Current Appointments This Week")
+    try:
+        current_appts = session.sql(f"""
+            SELECT 
+                a.appointmentid,
+                c.name as customer_name,
+                e.ename as technician_name,
+                a.scheduled_time,
+                a.service_type,
+                a.sta_tus,
+                a.notes
+            FROM appointments a
+            JOIN customers c ON a.customerid = c.customerid
+            JOIN employees e ON a.technicianid = e.employeeid
+            WHERE DATE(a.scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
+            ORDER BY a.scheduled_time
         """).collect()
-    else:
-        customers = session.sql("""
-            SELECT c.*, cu.* 
-            FROM customers c
-            LEFT JOIN customer_units cu ON c.customerid = cu.customerid
-        """).collect()
-
-    if not customers:
-        st.warning("No customers found.")
-        return
-
-    customer_options = {row['CUSTOMERID']: f"{row['NAME']} ({row['PHONE']})" for row in customers}
-    selected_customer_id = st.selectbox(
-        "Select Customer",
-        options=customer_options.keys(),
-        format_func=lambda x: customer_options[x]
-    )
-
-    if not selected_customer_id:
-        return
-
-    # Get selected customer details
-    selected_customer = next((c for c in customers if c['CUSTOMERID'] == selected_customer_id), None)
-    
-    if not selected_customer:
-        st.error("Customer not found")
-        return
-
-    # Display customer info header
-    st.write(f"### Equipment for {selected_customer['NAME']}")
-    st.write(f"**Address:** {selected_customer['ADDRESS']}")
-    st.write(f"**Phone:** {selected_customer['PHONE']}")
-
-    # Check if equipment info exists
-    if not selected_customer['UNITID']:
-        st.warning("No equipment information recorded for this customer.")
         
-        # Add new equipment form
-        with st.expander("➕ Add New Equipment Record"):
-            with st.form("add_equipment_form"):
-                st.subheader("Outdoor Unit")
-                outdoor_unit = st.text_input("Outdoor Unit Model")
-                outdoor_unit_age = st.number_input("Outdoor Unit Age (years)", min_value=0, max_value=50, step=1)
+        if current_appts:
+            appt_data = []
+            for appt in current_appts:
+                start = appt['SCHEDULED_TIME']
+                time_range = f"{start.hour}-{start.hour+2}"
                 
-                st.subheader("Indoor Unit")
-                indoor_unit = st.text_input("Indoor Unit Model")
-                indoor_unit_age = st.number_input("Indoor Unit Age (years)", min_value=0, max_value=50, step=1)
-                
-                st.subheader("Thermostat")
-                thermostat_type = st.text_input("Thermostat Type")
-                thermostat_age = st.number_input("Thermostat Age (years)", min_value=0, max_value=50, step=1)
-                
-                st.subheader("Location & Accessibility")
-                unit_location = st.selectbox(
-                    "Unit Location",
-                    ["Attic", "Basement", "Garage", "Closet", "Crawlspace", "Other"]
-                )
-                accessibility_level = st.selectbox(
-                    "Accessibility Level",
-                    ["Easy", "Moderate", "Difficult", "Very Difficult"]
-                )
-                accessibility_notes = st.text_area("Accessibility Notes")
-                other_notes = st.text_area("Other Notes")
-                
-                if st.form_submit_button("Save Equipment Record"):
-                    unit_id = f"UNIT{datetime.now().timestamp()}"
-                    session.sql(f"""
-                        INSERT INTO customer_units 
-                        (UNITID, CUSTOMERID, OUTDOOR_UNIT, OUTDOOR_UNIT_AGE, 
-                         INDOOR_UNIT, INDOOR_UNIT_AGE, THERMOSTAT_TYPE, THERMOSTAT_AGE,
-                         UNIT_LOCATION, ACCESSIBILITY_LEVEL, ACCESSIBILITY_NOTES, OTHER_NOTES)
-                        VALUES (
-                            '{unit_id}',
-                            '{selected_customer_id}',
-                            '{outdoor_unit}',
-                            {outdoor_unit_age},
-                            '{indoor_unit}',
-                            {indoor_unit_age},
-                            '{thermostat_type}',
-                            {thermostat_age},
-                            '{unit_location}',
-                            '{accessibility_level}',
-                            '{accessibility_notes}',
-                            '{other_notes}'
-                        )
-                    """).collect()
-                    st.success("Equipment record added successfully!")
-                    st.rerun()
-    else:
-        # Display existing equipment info
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("Outdoor Unit")
-            st.write(f"**Model:** {selected_customer['OUTDOOR_UNIT'] or 'Not recorded'}")
-            st.write(f"**Age:** {selected_customer['OUTDOOR_UNIT_AGE'] or 'N/A'} years")
-            
-            st.subheader("Indoor Unit")
-            st.write(f"**Model:** {selected_customer['INDOOR_UNIT'] or 'Not recorded'}")
-            st.write(f"**Age:** {selected_customer['INDOOR_UNIT_AGE'] or 'N/A'} years")
-            
-        with col2:
-            st.subheader("Thermostat")
-            st.write(f"**Type:** {selected_customer['THERMOSTAT_TYPE'] or 'Not recorded'}")
-            st.write(f"**Age:** {selected_customer['THERMOSTAT_AGE'] or 'N/A'} years")
-            
-            st.subheader("Location")
-            st.write(f"**Location:** {selected_customer['UNIT_LOCATION'] or 'Not recorded'}")
-            st.write(f"**Accessibility:** {selected_customer['ACCESSIBILITY_LEVEL'] or 'Not recorded'}")
-        
-        st.subheader("Additional Notes")
-        st.write(f"**Accessibility Notes:**")
-        st.info(selected_customer['ACCESSIBILITY_NOTES'] or "No notes available")
-        st.write(f"**Other Notes:**")
-        st.info(selected_customer['OTHER_NOTES'] or "No notes available")
-
-        # Edit equipment info
-        with st.expander("✏️ Edit Equipment Information"):
-            with st.form("edit_equipment_form"):
-                st.subheader("Outdoor Unit")
-                outdoor_unit = st.text_input("Outdoor Unit Model", value=selected_customer['OUTDOOR_UNIT'] or "")
-                outdoor_unit_age = st.number_input("Outdoor Unit Age (years)", 
-                                                 min_value=0, max_value=50, step=1,
-                                                 value=selected_customer['OUTDOOR_UNIT_AGE'] or 0)
-                
-                st.subheader("Indoor Unit")
-                indoor_unit = st.text_input("Indoor Unit Model", value=selected_customer['INDOOR_UNIT'] or "")
-                indoor_unit_age = st.number_input("Indoor Unit Age (years)", 
-                                                min_value=0, max_value=50, step=1,
-                                                value=selected_customer['INDOOR_UNIT_AGE'] or 0)
-                
-                st.subheader("Thermostat")
-                thermostat_type = st.text_input("Thermostat Type", value=selected_customer['THERMOSTAT_TYPE'] or "")
-                thermostat_age = st.number_input("Thermostat Age (years)", 
-                                              min_value=0, max_value=50, step=1,
-                                              value=selected_customer['THERMOSTAT_AGE'] or 0)
-                
-                st.subheader("Location & Accessibility")
-                unit_location = st.selectbox(
-                    "Unit Location",
-                    ["Attic", "Basement", "Garage", "Closet", "Crawlspace", "Other"],
-                    index=["Attic", "Basement", "Garage", "Closet", "Crawlspace", "Other"].index(
-                        selected_customer['UNIT_LOCATION'] or "Attic")
-                )
-                accessibility_level = st.selectbox(
-                    "Accessibility Level",
-                    ["Easy", "Moderate", "Difficult", "Very Difficult"],
-                    index=["Easy", "Moderate", "Difficult", "Very Difficult"].index(
-                        selected_customer['ACCESSIBILITY_LEVEL'] or "Easy")
-                )
-                accessibility_notes = st.text_area("Accessibility Notes", 
-                                                 value=selected_customer['ACCESSIBILITY_NOTES'] or "")
-                other_notes = st.text_area("Other Notes", 
-                                         value=selected_customer['OTHER_NOTES'] or "")
-                
-                if st.form_submit_button("Update Equipment Record"):
-                    session.sql(f"""
-                        UPDATE customer_units 
-                        SET OUTDOOR_UNIT = '{outdoor_unit}',
-                            OUTDOOR_UNIT_AGE = {outdoor_unit_age},
-                            INDOOR_UNIT = '{indoor_unit}',
-                            INDOOR_UNIT_AGE = {indoor_unit_age},
-                            THERMOSTAT_TYPE = '{thermostat_type}',
-                            THERMOSTAT_AGE = {thermostat_age},
-                            UNIT_LOCATION = '{unit_location}',
-                            ACCESSIBILITY_LEVEL = '{accessibility_level}',
-                            ACCESSIBILITY_NOTES = '{accessibility_notes}',
-                            OTHER_NOTES = '{other_notes}'
-                        WHERE CUSTOMERID = '{selected_customer_id}'
-                    """).collect()
-                    st.success("Equipment record updated successfully!")
-                    st.rerun()
-
-
-
-#######################################################################
-#######################################################################
-# Quotes/ Invoices
-
-def quotes():
-    session = get_session()
-    st.title("Quotes & Invoices")
-    
-    # Initialize session state for quote items if not exists
-    if 'quote_items' not in st.session_state:
-        st.session_state.quote_items = []
-    
-    # Create two tabs
-    tab_repair, tab_install = st.tabs(["Repair Services", "New Installation"])
-
-    with tab_repair:
-        st.header("Repair Service Quote")
-        
-        # Customer selection
-        customers = session.sql("SELECT customerid, name, phone, address, email FROM customers").collect()
-        customer_options = {row['CUSTOMERID']: f"{row['NAME']} ({row['PHONE']})" for row in customers}
-        
-        selected_customer_id = st.selectbox(
-            "Select Customer",
-            options=customer_options.keys(),
-            format_func=lambda x: customer_options[x],
-            key="repair_customer"
-        )
-        
-        # Get selected customer details
-        customer_info = next((c for c in customers if c['CUSTOMERID'] == selected_customer_id), None)
-        
-        # Date field
-        quote_date = st.date_input("Quote Date", value=datetime.now().date(), key="repair_date")
-        
-        # Repair services with prices (can select multiple)
-        repair_services = {
-            "Condenser service": 85,
-            "Replacing capacitor": 150,
-            "Adding refrigerant": 89,
-            "Leak detection": 125,
-            "Replacing fan motor": 200,
-            "Compressor replacement": 500,
-            "System diagnostic": 75,
-            "Thermostat replacement": 120
-        }
-        
-        selected_services = st.multiselect(
-            "Select Repair Services",
-            options=list(repair_services.keys()),
-            key="repair_services"
-        )
-        
-        # Service price editor
-        service_prices = {}
-        cols = st.columns(2)
-        for i, service in enumerate(selected_services):
-            with cols[i % 2]:
-                service_prices[service] = st.number_input(
-                    f"Price for {service} ($)",
-                    min_value=0.0,
-                    value=float(repair_services[service]),
-                    step=1.0,
-                    key=f"service_{service}"
-                )
-        
-        # Button to add services to quote
-        if st.button("Add Services to Quote", key="add_services"):
-            for service, price in service_prices.items():
-                st.session_state.quote_items.append({
-                    'type': 'Service',
-                    'description': service,
-                    'price': price,
-                    'quantity': 1
+                appt_data.append({
+                    "Date": start.strftime('%a %m/%d'),
+                    "Time": time_range,
+                    "Customer": appt['CUSTOMER_NAME'],
+                    "Technician": appt['TECHNICIAN_NAME'],
+                    "Service": appt['SERVICE_TYPE'],
+                    "Status": appt['STA_TUS']
                 })
-            st.success("Services added to quote!")
-        
-        # Materials section
-        st.subheader("Materials")
-        materials = {
-            "Refrigerant (per lb)": 25,
-            "Filter": 15,
-            "Wire (per ft)": 2,
-            "Water line (per ft)": 3,
-            "Capacitor": 45,
-            "Contactor": 60,
-            "Fan motor": 120,
-            "Thermostat": 85,
-            "Circuit board": 195,
-            "Ductwork (per ft)": 12
-        }
-        
-        selected_materials = st.multiselect(
-            "Select Materials Used", 
-            options=list(materials.keys()),
-            key="repair_materials"
-        )
-        
-        # Material price and quantity editor
-        material_prices = {}
-        material_quantities = {}
-        cols = st.columns(3)
-        for i, material in enumerate(selected_materials):
-            with cols[i % 3]:
-                material_prices[material] = st.number_input(
-                    f"Unit Price for {material} ($)",
-                    min_value=0.0,
-                    value=float(materials[material]),
-                    step=1.0,
-                    key=f"material_price_{material}"
-                )
-                material_quantities[material] = st.number_input(
-                    f"Qty for {material}",
-                    min_value=1,
-                    value=1,
-                    key=f"material_qty_{material}"
-                )
-        
-        # Button to add materials to quote
-        if st.button("Add Materials to Quote", key="add_materials"):
-            for material in selected_materials:
-                st.session_state.quote_items.append({
-                    'type': 'Material',
-                    'description': material,
-                    'price': material_prices[material],
-                    'quantity': material_quantities[material]
-                })
-            st.success("Materials added to quote!")
-        
-        # Labor and fees section
-        st.subheader("Labor & Fees")
-        labor_cost = st.number_input("Labor Cost ($)", min_value=0.0, value=85.0, step=1.0, key="repair_labor")
-        tax_rate = st.number_input("Tax Rate (%)", min_value=0.0, max_value=100.0, value=6.0, step=0.1, key="repair_tax")
-        
-        # Button to add labor to quote
-        if st.button("Add Labor to Quote", key="add_labor"):
-            st.session_state.quote_items.append({
-                'type': 'Labor',
-                'description': 'Labor',
-                'price': labor_cost,
-                'quantity': 1
-            })
-            st.success("Labor added to quote!")
-        
-        # Description/notes
-        description = st.text_area("Service Description", key="repair_description")
-        
-        # Display the quote table
-        st.subheader("Current Quote Items")
-        if st.session_state.quote_items:
-            # Convert to dataframe for nice display
-            import pandas as pd
-            quote_df = pd.DataFrame(st.session_state.quote_items)
             
-            # Calculate line totals
-            quote_df['Line Total'] = quote_df['price'] * quote_df['quantity']
-            
-            # Display the table with totals
-            st.dataframe(quote_df.style.format({
-                'price': '${:.2f}',
-                'Line Total': '${:.2f}'
-            }), use_container_width=True)
-            
-            # Calculate subtotal, tax, and total
-            subtotal = quote_df['Line Total'].sum()
-            tax = subtotal * (tax_rate / 100)
-            total = subtotal + tax
-            
-            # Display totals
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Subtotal", f"${subtotal:.2f}")
-                st.metric("Tax", f"${tax:.2f}")
-            with col2:
-                st.metric("Total", f"${total:.2f}", delta_color="off")
-            
-            # Buttons to manage quote
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                if st.button("Remove Last Item", key="remove_item"):
-                    if st.session_state.quote_items:
-                        st.session_state.quote_items.pop()
-                        st.rerun()
-            with col2:
-                if st.button("Clear All Items", key="clear_items"):
-                    st.session_state.quote_items = []
-                    st.rerun()
-            with col3:
-                if st.button("Finalize Quote", key="finalize_repair"):
-                    try:
-                        # First ensure the QUANTITY column exists in quote_items table
-                        try:
-                            session.sql("ALTER TABLE quote_items ADD COLUMN IF NOT EXISTS QUANTITY NUMBER").collect()
-                        except:
-                            pass  # Column may already exist
-                        
-                        # Generate quote ID
-                        quote_id = f"RQ_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                        
-                        # First ensure the columns exist in customers table
-                        try:
-                            session.sql("ALTER TABLE customers ADD COLUMN IF NOT EXISTS LAST_QUOTE_ID VARCHAR(50)").collect()
-                            session.sql("ALTER TABLE customers ADD COLUMN IF NOT EXISTS LAST_QUOTE_DATE TIMESTAMP").collect()
-                        except:
-                            pass  # Columns may already exist
-                        
-                        # Create quote record
-                        session.sql(f"""
-                            INSERT INTO quotes 
-                            (QUOTEID, CUSTOMERID, TOTAL_AMOUNT, DESCRIPTION, QUOTE_NUMBER, STATUS, CREATED_AT)
-                            VALUES (
-                                '{quote_id}',
-                                '{selected_customer_id}',
-                                {total},
-                                '{description.replace("'", "''")}',
-                                'QUOTE-{datetime.now().strftime('%m%d%y')}-{len(st.session_state.quote_items)}',
-                                'draft',
-                                '{datetime.now()}'
-                            )
-                        """).collect()
-                        
-                        # Add all quote items
-                        for item in st.session_state.quote_items:
-                            session.sql(f"""
-                                INSERT INTO quote_items (QUOTEID, ITEM_TYPE, ITEM_ID, PRICE, QUANTITY)
-                                VALUES (
-                                    '{quote_id}',
-                                    '{item['type'].upper()}',
-                                    '{item['description'].replace("'", "''")}',
-                                    {item['price']},
-                                    {item['quantity']}
-                                )
-                            """).collect()
-                        
-                        # Add tax as a separate item
-                        session.sql(f"""
-                            INSERT INTO quote_items (QUOTEID, ITEM_TYPE, ITEM_ID, PRICE, QUANTITY)
-                            VALUES (
-                                '{quote_id}',
-                                'TAX',
-                                'Sales Tax ({tax_rate}%)',
-                                {tax},
-                                1
-                            )
-                        """).collect()
-                        
-                        # Update customer record
-                        session.sql(f"""
-                            UPDATE customers 
-                            SET LAST_QUOTE_ID = '{quote_id}',
-                                LAST_QUOTE_DATE = '{datetime.now()}'
-                            WHERE CUSTOMERID = '{selected_customer_id}'
-                        """).collect()
-                        
-                        st.success("Quote created successfully!")
-                        
-                        # Generate the quote document
-                        quote_doc = f"""
-POTOMAC HVAC LLC
-(301)825-4447
-
-Invoice / Quote Number: QUOTE-{datetime.now().strftime('%m%d%y')}-{len(st.session_state.quote_items)}
-Date: {quote_date.strftime('%B %d, %Y')}
-
-Dear Customer Information:
-Name: {customer_info['NAME']}
-Phone: {customer_info['PHONE']}
-Address: {customer_info['ADDRESS']}
-
-Service Requested: {description or 'Various repair services'}
-
-Itemized Quote:
-{chr(10).join(f"- {item['type']}: {item['description']} ({item['quantity']} x ${item['price']:.2f}) = ${item['price'] * item['quantity']:.2f}" for item in st.session_state.quote_items)}
-- Tax: ${tax:.2f}
-----------------------------------
-Total: ${total:.2f}
-
-Payment:
-To initiate the service, we require a deposit of half the total price. 
-The service will commence within five business days of receiving the deposit. 
-The remaining balance is due upon completion of the service.
-
-We accept payment by check, cash, money order, Zelle, Venmo, and credit card (with a 3% fee).
-
-Warranty:
-We believe in the quality of our work and the products we use. 
-All parts come with a 10-year warranty by the manufacturer after registration. 
-Please note that labor costs are not included in this warranty. 
-However, our workmanship warranty is for a lifetime, covering any problems related to the installation.
-
-We truly appreciate your business and the trust you've placed in us.
-
-Potomac HVAC LLC
-(301)825-4447
-"""
-                        
-                        # Store the quote document for download/email
-                        st.session_state.current_quote = quote_doc
-                        st.session_state.current_quote_id = quote_id
-                        st.session_state.current_customer_email = customer_info['EMAIL']
-                        st.session_state.quote_items = []  # Clear the quote items after finalizing
-                        
-                    except Exception as e:
-                        st.error(f"Error creating quote: {str(e)}")
+            st.dataframe(
+                pd.DataFrame(appt_data),
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Date": "Date",
+                    "Time": "Time Slot",
+                    "Customer": "Customer",
+                    "Technician": "Technician",
+                    "Service": "Service Type",
+                    "Status": "Status"
+                }
+            )
         else:
-            st.info("No items added to quote yet. Add services or materials above.")
-
-    with tab_install:
-        st.header("New Installation Quote")
-        
-        # Customer selection
-        selected_customer_id = st.selectbox(
-            "Select Customer",
-            options=customer_options.keys(),
-            format_func=lambda x: customer_options[x],
-            key="install_customer"
-        )
-        
-        # Get selected customer details
-        customer_info = next((c for c in customers if c['CUSTOMERID'] == selected_customer_id), None)
-        
-        # Date field
-        quote_date = st.date_input("Quote Date", value=datetime.now().date(), key="install_date")
-        
-        # Installation dropdown
-        brands = ["Carrier", "Bryant", "Trane", "Lennox", "Rheem", "Other"]
-        selected_brand = st.selectbox("Select Unit Brand", options=brands, key="install_brand")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            unit_size = st.number_input("Unit Size (Ton)", min_value=1.0, max_value=5.0, step=0.5, key="install_size")
-        with col2:
-            unit_price = st.number_input("Unit Price ($)", min_value=0.0, value=4500.0, step=1.0, key="install_price")
-        
-        # Button to add unit to quote
-        if st.button("Add Unit to Quote", key="add_unit"):
-            st.session_state.quote_items.append({
-                'type': 'Equipment',
-                'description': f"{selected_brand} {unit_size} Ton Unit",
-                'price': unit_price,
-                'quantity': 1
-            })
-            st.success("Unit added to quote!")
-        
-        # Installation materials
-        st.subheader("Installation Materials")
-        install_materials = {
-            "Line set (per ft)": 8,
-            "Thermostat wire (per ft)": 1,
-            "Ductwork (per ft)": 12,
-            "Insulation (per ft)": 3,
-            "Pad": 85,
-            "Disconnect box": 65,
-            "Condensate pump": 120,
-            "Vent pipe (per ft)": 5
-        }
-        
-        selected_install_materials = st.multiselect(
-            "Select Installation Materials", 
-            options=list(install_materials.keys()),
-            key="install_materials"
-        )
-        
-        # Material price and quantity editor
-        install_material_prices = {}
-        install_material_quantities = {}
-        cols = st.columns(3)
-        for i, material in enumerate(selected_install_materials):
-            with cols[i % 3]:
-                install_material_prices[material] = st.number_input(
-                    f"Unit Price for {material} ($)",
-                    min_value=0.0,
-                    value=float(install_materials[material]),
-                    step=1.0,
-                    key=f"install_mat_price_{material}"
-                )
-                install_material_quantities[material] = st.number_input(
-                    f"Qty for {material}",
-                    min_value=1,
-                    value=1,
-                    key=f"install_mat_qty_{material}"
-                )
-        
-        # Button to add materials to quote
-        if st.button("Add Materials to Quote", key="add_install_materials"):
-            for material in selected_install_materials:
-                st.session_state.quote_items.append({
-                    'type': 'Material',
-                    'description': material,
-                    'price': install_material_prices[material],
-                    'quantity': install_material_quantities[material]
-                })
-            st.success("Materials added to quote!")
-        
-        # Installation labor and fees
-        st.subheader("Installation Labor & Fees")
-        install_labor_cost = st.number_input("Installation Labor Cost ($)", min_value=0.0, value=850.0, step=1.0, key="install_labor")
-        install_tax_rate = st.number_input("Tax Rate (%)", min_value=0.0, max_value=100.0, value=6.0, step=0.1, key="install_tax")
-        
-        # Button to add labor to quote
-        if st.button("Add Labor to Quote", key="add_install_labor"):
-            st.session_state.quote_items.append({
-                'type': 'Labor',
-                'description': 'Installation Labor',
-                'price': install_labor_cost,
-                'quantity': 1
-            })
-            st.success("Labor added to quote!")
-        
-        # Installation description
-        install_description = st.text_area("Installation Details", key="install_description")
-        
-        # Display the quote table (shared between both tabs)
-        st.subheader("Current Quote Items")
-        if st.session_state.quote_items:
-            # Convert to dataframe for nice display
-            import pandas as pd
-            quote_df = pd.DataFrame(st.session_state.quote_items)
+            st.info("No appointments scheduled for this week")
             
-            # Calculate line totals
-            quote_df['Line Total'] = quote_df['price'] * quote_df['quantity']
-            
-            # Display the table with totals
-            st.dataframe(quote_df.style.format({
-                'price': '${:.2f}',
-                'Line Total': '${:.2f}'
-            }), use_container_width=True)
-            
-            # Calculate subtotal, tax, and total
-            subtotal = quote_df['Line Total'].sum()
-            tax = subtotal * (install_tax_rate / 100)
-            total = subtotal + tax
-            
-            # Display totals
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Subtotal", f"${subtotal:.2f}")
-                st.metric("Tax", f"${tax:.2f}")
-            with col2:
-                st.metric("Total", f"${total:.2f}", delta_color="off")
-            
-            # Buttons to manage quote
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                if st.button("Remove Last Item", key="remove_install_item"):
-                    if st.session_state.quote_items:
-                        st.session_state.quote_items.pop()
-                        st.rerun()
-            with col2:
-                if st.button("Clear All Items", key="clear_install_items"):
-                    st.session_state.quote_items = []
-                    st.rerun()
-            with col3:
-                if st.button("Finalize Quote", key="finalize_install"):
-                    try:
-                        # First ensure the QUANTITY column exists in quote_items table
-                        try:
-                            session.sql("ALTER TABLE quote_items ADD COLUMN IF NOT EXISTS QUANTITY NUMBER").collect()
-                        except:
-                            pass  # Column may already exist
-                        
-                        # Generate quote ID
-                        quote_id = f"IQ_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                        
-                        # First ensure the columns exist in customers table
-                        try:
-                            session.sql("ALTER TABLE customers ADD COLUMN IF NOT EXISTS LAST_QUOTE_ID VARCHAR(50)").collect()
-                            session.sql("ALTER TABLE customers ADD COLUMN IF NOT EXISTS LAST_QUOTE_DATE TIMESTAMP").collect()
-                        except:
-                            pass  # Columns may already exist
-                        
-                        # Create quote record
-                        session.sql(f"""
-                            INSERT INTO quotes 
-                            (QUOTEID, CUSTOMERID, TOTAL_AMOUNT, DESCRIPTION, QUOTE_NUMBER, STATUS, CREATED_AT)
-                            VALUES (
-                                '{quote_id}',
-                                '{selected_customer_id}',
-                                {total},
-                                '{install_description.replace("'", "''")}',
-                                'INST-{datetime.now().strftime('%m%d%y')}-{unit_size}',
-                                'draft',
-                                '{datetime.now()}'
-                            )
-                        """).collect()
-                        
-                        # Add all quote items
-                        for item in st.session_state.quote_items:
-                            session.sql(f"""
-                                INSERT INTO quote_items (QUOTEID, ITEM_TYPE, ITEM_ID, PRICE, QUANTITY)
-                                VALUES (
-                                    '{quote_id}',
-                                    '{item['type'].upper()}',
-                                    '{item['description'].replace("'", "''")}',
-                                    {item['price']},
-                                    {item['quantity']}
-                                )
-                            """).collect()
-                        
-                        # Add tax as a separate item
-                        session.sql(f"""
-                            INSERT INTO quote_items (QUOTEID, ITEM_TYPE, ITEM_ID, PRICE, QUANTITY)
-                            VALUES (
-                                '{quote_id}',
-                                'TAX',
-                                'Sales Tax ({install_tax_rate}%)',
-                                {tax},
-                                1
-                            )
-                        """).collect()
-                        
-                        # Update customer record
-                        session.sql(f"""
-                            UPDATE customers 
-                            SET LAST_QUOTE_ID = '{quote_id}',
-                                LAST_QUOTE_DATE = '{datetime.now()}'
-                            WHERE CUSTOMERID = '{selected_customer_id}'
-                        """).collect()
-                        
-                        st.success("Installation quote created successfully!")
-                        
-                        # Generate the quote document
-                        quote_doc = f"""
-POTOMAC HVAC LLC
-(301)825-4447
+    except Exception as e:
+        st.error(f"Error loading appointments: {str(e)}")
 
-Invoice / Quote Number: INST-{datetime.now().strftime('%m%d%y')}-{unit_size}
-Date: {quote_date.strftime('%B %d, %Y')}
-
-Dear Customer Information:
-Name: {customer_info['NAME']}
-Phone: {customer_info['PHONE']}
-Address: {customer_info['ADDRESS']}
-
-Service Requested: New {selected_brand} {unit_size} Ton HVAC Installation
-
-Installation Details:
-{install_description}
-
-Itemized Quote:
-{chr(10).join(f"- {item['type']}: {item['description']} ({item['quantity']} x ${item['price']:.2f}) = ${item['price'] * item['quantity']:.2f}" for item in st.session_state.quote_items)}
-- Tax: ${tax:.2f}
-----------------------------------
-Total: ${total:.2f}
-
-Payment:
-To initiate the installation process, we require a deposit of half the total price. 
-The installation will commence within five business days of receiving the deposit. 
-The remaining balance is due upon completion of the installation.
-
-We accept payment by check, cash, money order, Zelle, Venmo, and credit card (with a 3% fee).
-
-Warranty:
-We believe in the quality of our work and the products we use. 
-All units come with a 10-year part warranty by the manufacturer after registration. 
-Please note that labor costs are not included in this warranty. 
-However, our installation warranty is for a lifetime, covering any problems related to the installation.
-
-We truly appreciate your business and the trust you've placed in us.
-
-Potomac HVAC LLC
-(301)825-4447
-"""
-                        
-                        # Store the quote document for download/email
-                        st.session_state.current_quote = quote_doc
-                        st.session_state.current_quote_id = quote_id
-                        st.session_state.current_customer_email = customer_info['EMAIL']
-                        st.session_state.quote_items = []  # Clear the quote items after finalizing
-                        
-                    except Exception as e:
-                        st.error(f"Error creating installation quote: {str(e)}")
-        else:
-            st.info("No items added to quote yet. Add unit or materials above.")
-
-    # Document actions section (appears after quote creation)
-    if 'current_quote' in st.session_state:
-        st.subheader("Quote Actions")
-        
-        # Download button
-        st.download_button(
-            label="Download Quote Document",
-            data=st.session_state.current_quote,
-            file_name=f"quote_{st.session_state.current_quote_id}.txt",
-            mime="text/plain"
-        )
-        
-        # Email button (if customer has email)
-        if st.session_state.current_customer_email:
-            if st.button("Email Quote to Customer"):
-                try:
-                    # In a real implementation, you would integrate with an email service here
-                    # This is just a placeholder
-                    st.success(f"Quote emailed to {st.session_state.current_customer_email}")
-                    
-                    # Update quote status to 'sent'
-                    session.sql(f"""
-                        UPDATE quotes 
-                        SET STATUS = 'sent',
-                            SENT_DATE = CURRENT_TIMESTAMP(),
-                            SENT_METHOD = 'email'
-                        WHERE QUOTEID = '{st.session_state.current_quote_id}'
-                    """).collect()
-                    
-                except Exception as e:
-                    st.error(f"Error sending email: {str(e)}")
-        else:
-            st.warning("Customer doesn't have an email address on file")
-        
-        # Mark as sent manually
-        if st.button("Mark as Sent (Other Method)"):
-            try:
-                session.sql(f"""
-                    UPDATE quotes 
-                    SET STATUS = 'sent',
-                        SENT_DATE = CURRENT_TIMESTAMP(),
-                        SENT_METHOD = 'other'
-                    WHERE QUOTEID = '{st.session_state.current_quote_id}'
-                """).collect()
-                st.success("Quote marked as sent")
-            except Exception as e:
-                st.error(f"Error updating quote status: {str(e)}")
-
-             
+    # Navigation controls
+    if st.button("🔄 Refresh Appointments"):
+        st.rerun()
 
 #######################################################################
 #######################################################################
+
+##################################   
 #######################################################################
-#######################################################################
-
-# Invoices
-def invoices():
-    st.subheader("🧾 coming soon")
-    session = get_session()
-
-
-#######################################################################
-# Payments
-def payments():
-    st.subheader("💳 Payments , coming soon")
-    session = get_session()
-
-#######################################################################
-
-# Reports
-def reports():
-    st.subheader("📈 Reports coming soon")
-    session = get_session()
-
-#######################################################################
-# Analytics
-# Analytics Page
-def analytics():
-    st.subheader("📈 Analytics is coming soon")
-    
-#######################################################################
-
 # Admin Tab: Manage All Tables
 
 def admin_tables():
@@ -2673,10 +2727,10 @@ def admin_tables():
  
                                      
   
+
 #######################################################################
 # Main app function
-   
-
+import streamlit as st
 def main_app():
     st.sidebar.title(f"Welcome {st.session_state.user_name}")
 
@@ -2689,8 +2743,8 @@ def main_app():
     available_tabs.add("profile")
 
     # Define tab order
-    tab_order = ['Home', 'profile', 'customers', 'appointments', 'quotes', 
-                'invoices', 'payments', 'reports', 'analytics', 'admin_tables', 'equipment']
+    tab_order = ['Home', 'profile', 'customers', 'appointments', 
+               'admin_tables']
     
     available_tabs = [tab for tab in tab_order if tab in available_tabs]
 
@@ -2703,20 +2757,10 @@ def main_app():
         profile_page()    
     elif selected_tab == 'customers':
         customer_management()
-    elif selected_tab == 'equipment':
-        equipment_management()    
+       
     elif selected_tab == 'appointments':
         appointments()
-    elif selected_tab == 'quotes':
-        quotes()
-    elif selected_tab == 'invoices':
-        invoices()
-    elif selected_tab == 'payments':
-        payments()
-    elif selected_tab == 'reports':
-        reports()
-    elif selected_tab == 'analytics':
-        analytics()
+     
     elif selected_tab == 'admin_tables':
         admin_tables()  # Now this is defined before being called
 
@@ -2733,4 +2777,4 @@ if __name__ == '__main__':
     elif not st.session_state.get('logged_in'):
         login_page()
     else:
-        main_app() 
+        main_app()
