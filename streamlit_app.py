@@ -4,7 +4,15 @@ from snowflake.snowpark.context import get_active_session
 
 # Get the current credentials
 
+# Replace existing session initialization code with:
+def get_session():
+    if 'snowpark_session' not in st.session_state:
+        # For Streamlit Cloud deployment
+        ctx = st.connection("snowflake")
+        st.session_state.snowpark_session = ctx.session()
+    return st.session_state.snowpark_session
 
+session = get_session()  # Use this session everywhere
 
 import streamlit.components.v1 as components
 import streamlit as st
