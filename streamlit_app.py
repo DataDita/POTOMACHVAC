@@ -1,3 +1,6 @@
+
+
+
 import streamlit as st
 from snowflake.snowpark import Session
 import snowflake.snowpark as sp
@@ -10,6 +13,7 @@ import base64
 from PIL import Image, ImageOps
 import io
 import requests
+import os  # Add this import
 
 # Initialize Snowflake connection
 def get_session():
@@ -17,17 +21,37 @@ def get_session():
         # First, try to get the active session (works inside Snowflake)
         return sp.context.get_active_session()
     except:
-        # If that fails, create a new session using credentials from Streamlit secrets
-        conn_config = st.secrets["connections.snowflake"]
-        return Session.builder.configs(conn_config).create()
+        try:
+            # Try Streamlit secrets (for Streamlit Cloud)
+            conn_config = st.secrets["connections.snowflake"]
+            return Session.builder.configs(conn_config).create()
+        except KeyError:
+            # Fallback to local environment variables (for local development)
+            return Session.builder.configs({
+                "account": os.getenv("ACYRHOY-MR97012"),
+                "user": os.getenv("DIBA"),
+                "password": os.getenv("Potomachvac200$"),
+                "role": os.getenv("SNOWFLAKE_ROLE", "SYSADMIN"),
+                "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
+                "database": os.getenv("SNOWFLAKE_DATABASE", "POTOMAC_HVAC"),
+                "schema": os.getenv("SNOWFLAKE_SCHEMA", "PUBLIC"),
+                "client_session_keep_alive": True
+            }).create()
 
 # Role-based access control
 ROLE_ACCESS = {
     'admin': ['Home', 'profile', 'customers', 'appointments', 'admin_tables','quote'],
-    'office': ['Home', 'customers', 'appointments', 'equipment'],
+    'office': ['Home', 'customers', 'appointments'],
     'technician': ['Home', 'profile'],
     'driver': ['Home', 'profile', 'driver_tasks']
 }
+
+
+##########################################################################################
+##########################################################################################
+##########################################################################################
+
+
 ##########################################################################################
 ##########################################################################################
 # Login page
