@@ -1,4 +1,6 @@
 #requirements.txt
+snowflake-connector-python
+python-dotenv
 snowflake-snowpark-python
 streamlit
 requests
