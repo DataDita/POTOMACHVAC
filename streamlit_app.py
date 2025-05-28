@@ -28,13 +28,7 @@ ROLE_ACCESS = {
 }
 
 
-# Role-based access control
-ROLE_ACCESS = {
-    'admin': ['Home', 'profile', 'customers', 'appointments', 'admin_tables','quote'],
-    'office': ['Home', 'customers', 'appointments'],
-    'technician': ['Home', 'profile'],
-    'driver': ['Home', 'profile', 'driver_tasks']
-}
+
 
 
 ##########################################################################################
