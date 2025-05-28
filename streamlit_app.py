@@ -17,37 +17,15 @@ import os  # Add this import
 
 # Initialize Snowflake connection
 def get_session():
-    try:
-        # First, try to get the active session (works inside Snowflake)
-        return sp.context.get_active_session()
-    except:
-        # Try Streamlit secrets (for Streamlit Cloud)
-        try:
-            conn_config = st.secrets["connections.snowflake"]
-            if not conn_config.get("account"):
-                st.error("Snowflake account is missing in secrets")
-                st.stop()
-            return Session.builder.configs(conn_config).create()
-        except KeyError:
-            # Fallback to local environment variables
-            account = os.getenv("SNOWFLAKE_ACCOUNT")
-            if not account:
-                st.error("Snowflake account is not configured. Please set secrets or environment variables.")
-                st.stop()
-                
-            return Session.builder.configs({
-                "account": account,
-                "user": os.getenv("SNOWFLAKE_USER"),
-                "password": os.getenv("SNOWFLAKE_PASSWORD"),
-                "role": os.getenv("SNOWFLAKE_ROLE", "SYSADMIN"),
-                "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
-                "database": os.getenv("SNOWFLAKE_DATABASE", "POTOMAC_HVAC"),
-                "schema": os.getenv("SNOWFLAKE_SCHEMA", "PUBLIC"),
-                "client_session_keep_alive": True
-            }).create()
-        except Exception as e:
-            st.error(f"Error creating session: {str(e)}")
-            st.stop()
+    return sp.context.get_active_session()
+
+# Role-based access control
+ROLE_ACCESS = {
+    'admin': ['Home', 'profile', 'customers', 'appointments', 'quotes', 'invoices', 'payments', 'reports', 'analytics', 'admin_tables', 'equipment'],
+    'office': ['Home', 'customers', 'appointments', 'equipment'],
+    'technician': ['Home', 'profile', 'quotes', 'invoices', 'payments', 'equipment'],
+    'driver': ['Home', 'profile', 'driver_tasks']
+}
 
 
 # Role-based access control
