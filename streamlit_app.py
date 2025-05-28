@@ -16,8 +16,30 @@ import requests
 import os  # Add this import
 
 # Initialize Snowflake connection
+# Updated session initialization
 def get_session():
-    return sp.context.get_active_session()
+    try:
+        # Explicit connection parameters
+        conn_params = {
+            "account": st.secrets["snowflake"]["account"],
+            "user": st.secrets["snowflake"]["user"],
+            "password": st.secrets["snowflake"]["password"],
+            "warehouse": st.secrets["snowflake"]["warehouse"],
+            "database": st.secrets["snowflake"]["database"],
+            "schema": st.secrets["snowflake"]["schema"]
+        }
+        return Session.builder.configs(conn_params).create()
+    except Exception as e:
+        st.error(f"❌ Connection failed: {str(e)}")
+        return None
+
+# Initialize session at app start
+if 'session' not in st.session_state:
+    st.session_state.session = get_session()
+    if st.session_state.session:
+        st.success("✅ Snowflake connection established")
+
+
 
 # Role-based access control
 ROLE_ACCESS = {
@@ -26,7 +48,6 @@ ROLE_ACCESS = {
     'technician': ['Home', 'profile', 'quotes', 'invoices', 'payments', 'equipment'],
     'driver': ['Home', 'profile', 'driver_tasks']
 }
-
 
 
 
@@ -155,8 +176,21 @@ def reset_password(token):
 #############HOME#####################################################
 
 def Home():
-    # Establish connection to Snowflake database using existing session
-    session = get_session()
+    session = st.session_state.session
+    if not session:
+        st.error("Database connection unavailable")
+        return
+        
+    # Verify required tables exist
+    required_tables = ["appointments", "customers", "employee_time_entries"]
+    missing_tables = [t for t in required_tables if not table_exists(t)]
+    
+    if missing_tables:
+        st.error(f"Missing tables: {', '.join(missing_tables)}")
+        return
+    
+    
+    
     
     # Initialize variables for time tracking with default values
     selected_date = datetime.now().date()  # Set default date to today
