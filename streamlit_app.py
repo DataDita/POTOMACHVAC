@@ -83,7 +83,7 @@ def login_page():
 # Forgot password functionality
 def forgot_password():
     st.subheader("🔒 Forgot Password")
-    email = st.text_input("Enter your email address")
+    email = st.text_input("Enter your email ADDRESS")
     if st.button("Send Reset Link"):
         session = get_session()
         try:
@@ -108,7 +108,7 @@ def forgot_password():
                 """).collect()
                 st.success("Password reset link sent to your email!")
             else:
-                st.error("No account found with that email address")
+                st.error("No account found with that email ADDRESS")
         except Exception as e:
             st.error(f"Error processing request: {str(e)}")
 ##########################################################################################
@@ -525,13 +525,13 @@ def Home():
     appointments = session.sql(f"""
         SELECT 
             a.appointmentid,
-            a.service_type,
-            a.scheduled_time,
-            a.sta_tus,
+            a.SERVICE_TYPE,
+            a.SCHEDULED_TIME,
+            a.status,
             c.name AS customer_name,
-            c.address,
-            c.unit,
-            c.city,
+            c.ADDRESS,
+            c.UNIT,
+            c.CITY,
             c.state,
             c.zipcode,
             c.has_lock_box,
@@ -540,16 +540,16 @@ def Home():
             c.safety_alarm,
             c.entrance_note,
             c.note,
-            c.unit_location,
+            c.UNIT_location,
             c.accessibility_level,
             c.phone,
             c.email
         FROM appointments a
         JOIN customers c ON a.customerid = c.customerid
         WHERE a.technicianid = '{st.session_state.user_id}'
-        AND a.scheduled_time BETWEEN CURRENT_TIMESTAMP() 
+        AND a.SCHEDULED_TIME BETWEEN CURRENT_TIMESTAMP() 
             AND DATEADD('day', 7, CURRENT_TIMESTAMP())
-        ORDER BY a.scheduled_time
+        ORDER BY a.SCHEDULED_TIME
     """).collect()
 
     if not appointments:  # Handle no appointments case
@@ -570,30 +570,29 @@ def Home():
             st.write(f"{dt.strftime('%a %m/%d')}\n{dt.strftime('%I:%M %p')}")
         
         with col3:  # Customer info column
-            full_address = f"{appt['ADDRESS']}, {appt['CITY']}, {appt['STATE']} {appt['ZIPCODE']}"
-            # Create Google Maps link
-            maps_url = f"https://www.google.com/maps/search/?api=1&query={full_address.replace(' ', '+')}"
+            from urllib.parse import quote
+            maps_url = f"https://www.google.com/maps/search/?api=1&query={quote(full_address)}"
             
 
             # Expandable section for detailed customer info
             with st.expander(f"**{appt['CUSTOMER_NAME']}** - {appt['ADDRESS']}, {appt['CITY']}"):
-                # Clickable address link
-                st.markdown(f"**Complete Address:** [📌 {full_address}]({maps_url})")
+                # Clickable ADDRESS link
+                st.markdown(f"**Complete ADDRESS:** [📌 {full_ADDRESS}]({maps_url})")
                 # Display all customer details
                 st.markdown(f"""
-                    **Unit #:** {appt['UNIT'] or 'N/A'}  
+                    **UNIT #:** {appt['UNIT'] or 'N/A'}  
                     **Lock Box Code:** {appt['LOCK_BOX_CODE'] if appt['HAS_LOCK_BOX'] == 'Yes' else 'N/A'}  
                     **Safety Alarm:** {appt['SAFETY_ALARM'] if appt['HAS_SAFETY_ALARM'] == 'Yes' else 'N/A'}  
                     **Entrance Notes:** {appt['ENTRANCE_NOTE'] or 'N/A'}  
                     **General Notes:** {appt['NOTE'] or 'N/A'}  
-                    **Unit Location:** {appt['UNIT_LOCATION']}  
+                    **UNIT Location:** {appt['UNIT_LOCATION']}  
                     **Accessibility:** {appt['ACCESSIBILITY_LEVEL']}  
                     **Phone:** {appt['PHONE']}  
                     **Email:** {appt['EMAIL'] or 'N/A'}
                 """)
 
         with col4:  # Status management column
-            current_status = appt['STA_TUS'].lower()  # Get lowercase status
+            current_status = appt['status'].lower()  # Get lowercase status
             # Color coding for status badges
             status_colors = {
                 'scheduled': '#4a4a4a',  # Dark gray
@@ -623,7 +622,7 @@ def Home():
                 if st.button("✅ Accept", key=f"accept_{appt['APPOINTMENTID']}"):
                     session.sql(f"""
                         UPDATE appointments
-                        SET STA_TUS = 'accepted'
+                        SET status = 'accepted'
                         WHERE APPOINTMENTID = '{appt['APPOINTMENTID']}'
                     """).collect()
                     st.rerun()
@@ -632,7 +631,7 @@ def Home():
                 if st.button("❌ Decline", key=f"decline_{appt['APPOINTMENTID']}"):
                     session.sql(f"""
                         UPDATE appointments
-                        SET STA_TUS = 'declined'
+                        SET status = 'declined'
                         WHERE APPOINTMENTID = '{appt['APPOINTMENTID']}'
                     """).collect()
                     st.rerun()
@@ -642,7 +641,7 @@ def Home():
                 if st.button("📍 I'm Here", key=f"arrived_{appt['APPOINTMENTID']}"):
                     session.sql(f"""
                         UPDATE appointments
-                        SET STA_TUS = 'arrived'
+                        SET status = 'arrived'
                         WHERE APPOINTMENTID = '{appt['APPOINTMENTID']}'
                     """).collect()
                     st.rerun()
@@ -945,15 +944,15 @@ def profile_page():
         appointments = session.sql(f"""
             SELECT 
                 c.name as customer,
-                a.scheduled_time,
-                TO_VARCHAR(a.scheduled_time, 'HH12:MI AM') as time,
-                a.sta_tus as status,
+                a.SCHEDULED_TIME,
+                TO_VARCHAR(a.SCHEDULED_TIME, 'HH12:MI AM') as time,
+                a.status as status,
                 a.notes
             FROM appointments a
             JOIN customers c ON a.customerid = c.customerid
             WHERE a.technicianid = '{st.session_state.user_id}'
-            AND DATE(a.scheduled_time) BETWEEN '{start_date}' AND '{end_date}'
-            ORDER BY a.scheduled_time
+            AND DATE(a.SCHEDULED_TIME) BETWEEN '{start_date}' AND '{end_date}'
+            ORDER BY a.SCHEDULED_TIME
         """).collect()
         
         if appointments:
@@ -976,15 +975,21 @@ def customer_management():
     st.subheader("👥 Customer Management")
     session = get_session()
 
+
+    if 'selected_customer_id' not in st.session_state:
+        st.session_state.selected_customer_id = None
+    if 'selected_customer_name' not in st.session_state:
+        st.session_state.selected_customer_name = None
+
     # Initialize session state for form persistence
     if 'customer_form_data' not in st.session_state:
         st.session_state.customer_form_data = {
             'name': '',
             'phone': '',
             'email': '',
-            'address': '',
-            'unit': '',
-            'city': '',
+            'ADDRESS': '',
+            'UNIT': '',
+            'CITY': '',
             'state': 'MD',
             'zipcode': '',
             'has_lock_box': 'No',
@@ -995,12 +1000,12 @@ def customer_management():
             'friend_name': '',
             'note': '',
             'entrance_note': '',
-            'outdoor_unit_model': '',
-            'outdoor_unit_serial': '',
-            'indoor_unit_model': '',
-            'indoor_unit_serial': '',
+            'outdoor_UNIT_model': '',
+            'outdoor_UNIT_serial': '',
+            'indoor_UNIT_model': '',
+            'indoor_UNIT_serial': '',
             'thermostat_type': '',
-            'unit_location': 'Attic',
+            'UNIT_location': 'Attic',
             'accessibility_level': 'Easy',
         }
 
@@ -1014,11 +1019,11 @@ def customer_management():
                 name = st.text_input("Full Name*", value=st.session_state.customer_form_data['name'])
                 phone = st.text_input("Phone* (###-###-####)", value=st.session_state.customer_form_data['phone'], placeholder="301-555-1234")
                 email = st.text_input("Email", value=st.session_state.customer_form_data['email'])
-                address = st.text_input("Street Address*", value=st.session_state.customer_form_data['address'])
-                unit = st.text_input("Unit/Apt", value=st.session_state.customer_form_data['unit'])
+                ADDRESS = st.text_input("Street ADDRESS*", value=st.session_state.customer_form_data['ADDRESS'])
+                UNIT = st.text_input("UNIT/Apt", value=st.session_state.customer_form_data['UNIT'])
                 
             with col2:
-                city = st.text_input("City*", value=st.session_state.customer_form_data['city'])
+                CITY = st.text_input("CITY*", value=st.session_state.customer_form_data['CITY'])
                 state = st.selectbox("State*", ["MD", "DC", "VA"], index=["MD", "DC", "VA"].index(st.session_state.customer_form_data['state']))
                 zipcode = st.text_input("Zip Code* (5 or 9 digits)", value=st.session_state.customer_form_data['zipcode'])
                 
@@ -1052,18 +1057,18 @@ def customer_management():
             st.subheader("Equipment Information")
             col1, col2 = st.columns(2)
             with col1:
-                outdoor_unit_model = st.text_input("Outdoor Unit Model", value=st.session_state.customer_form_data['outdoor_unit_model'])
-                outdoor_unit_serial = st.text_input("Outdoor Unit Serial Number", value=st.session_state.customer_form_data['outdoor_unit_serial'])
-                indoor_unit_model = st.text_input("Indoor Unit Model", value=st.session_state.customer_form_data['indoor_unit_model'])
-                indoor_unit_serial = st.text_input("Indoor Unit Serial Number", value=st.session_state.customer_form_data['indoor_unit_serial'])
+                outdoor_UNIT_model = st.text_input("Outdoor UNIT Model", value=st.session_state.customer_form_data['outdoor_UNIT_model'])
+                outdoor_UNIT_serial = st.text_input("Outdoor UNIT Serial Number", value=st.session_state.customer_form_data['outdoor_UNIT_serial'])
+                indoor_UNIT_model = st.text_input("Indoor UNIT Model", value=st.session_state.customer_form_data['indoor_UNIT_model'])
+                indoor_UNIT_serial = st.text_input("Indoor UNIT Serial Number", value=st.session_state.customer_form_data['indoor_UNIT_serial'])
                 
             with col2:
                 thermostat_type = st.text_input("Thermostat Type", value=st.session_state.customer_form_data['thermostat_type'])
-                unit_location = st.selectbox(
-                    "Unit Location",
+                UNIT_location = st.selectbox(
+                    "UNIT Location",
                     ["Attic", "Basement", "Garage", "Closet", "Crawlspace", "Other"],
                     index=["Attic", "Basement", "Garage", "Closet", "Crawlspace", "Other"].index(
-                        st.session_state.customer_form_data['unit_location'])
+                        st.session_state.customer_form_data['UNIT_location'])
                 )
                 accessibility_level = st.selectbox(
                     "Accessibility Level",
@@ -1073,8 +1078,8 @@ def customer_management():
                 )
             
             # Upload pictures
-            st.subheader("Unit Pictures")
-            uploaded_files = st.file_uploader("Upload pictures of the HVAC unit", 
+            st.subheader("UNIT Pictures")
+            uploaded_files = st.file_uploader("Upload pictures of the HVAC UNIT", 
                                             accept_multiple_files=True, 
                                             type=['jpg', 'jpeg', 'png'])
             
@@ -1092,9 +1097,9 @@ def customer_management():
                         'name': '',
                         'phone': '',
                         'email': '',
-                        'address': '',
-                        'unit': '',
-                        'city': '',
+                        'ADDRESS': '',
+                        'UNIT': '',
+                        'CITY': '',
                         'state': 'MD',
                         'zipcode': '',
                         'has_lock_box': 'No',
@@ -1105,12 +1110,12 @@ def customer_management():
                         'friend_name': '',
                         'note': '',
                         'entrance_note': '',
-                        'outdoor_unit_model': '',
-                        'outdoor_unit_serial': '',
-                        'indoor_unit_model': '',
-                        'indoor_unit_serial': '',
+                        'outdoor_UNIT_model': '',
+                        'outdoor_UNIT_serial': '',
+                        'indoor_UNIT_model': '',
+                        'indoor_UNIT_serial': '',
                         'thermostat_type': '',
-                        'unit_location': 'Attic',
+                        'UNIT_location': 'Attic',
                         'accessibility_level': 'Easy'
                     }
                     st.rerun()
@@ -1121,9 +1126,9 @@ def customer_management():
                     'name': name,
                     'phone': phone,
                     'email': email,
-                    'address': address,
-                    'unit': unit,
-                    'city': city,
+                    'ADDRESS': ADDRESS,
+                    'UNIT': UNIT,
+                    'CITY': CITY,
                     'state': state,
                     'zipcode': zipcode,
                     'has_lock_box': has_lock_box,
@@ -1134,12 +1139,12 @@ def customer_management():
                     'friend_name': friend_name if how_heard == "Friend" else '',
                     'note': note,
                     'entrance_note': entrance_note,
-                    'outdoor_unit_model': outdoor_unit_model,
-                    'outdoor_unit_serial': outdoor_unit_serial,
-                    'indoor_unit_model': indoor_unit_model,
-                    'indoor_unit_serial': indoor_unit_serial,
+                    'outdoor_UNIT_model': outdoor_UNIT_model,
+                    'outdoor_UNIT_serial': outdoor_UNIT_serial,
+                    'indoor_UNIT_model': indoor_UNIT_model,
+                    'indoor_UNIT_serial': indoor_UNIT_serial,
                     'thermostat_type': thermostat_type,
-                    'unit_location': unit_location,
+                    'UNIT_location': UNIT_location,
                     'accessibility_level': accessibility_level
                 })
 
@@ -1151,10 +1156,10 @@ def customer_management():
                     errors.append("Phone is required")
                 elif not re.match(r"^\d{3}-\d{3}-\d{4}$", phone):
                     errors.append("Invalid phone format (use ###-###-####)")
-                if not address:
-                    errors.append("Address is required")
-                if not city:
-                    errors.append("City is required")
+                if not ADDRESS:
+                    errors.append("ADDRESS is required")
+                if not CITY:
+                    errors.append("CITY is required")
                 if not state:
                     errors.append("State is required")
                 if not zipcode:
@@ -1202,7 +1207,7 @@ def customer_management():
                         
                         # Build the insert query with proper string escaping
                         email_escaped = email.replace("'", "''") if email else None
-                        unit_escaped = unit.replace("'", "''") if unit else None
+                        UNIT_escaped = UNIT.replace("'", "''") if UNIT else None
                         lock_box_code_escaped = lock_box_code.replace("'", "''") if has_lock_box == "Yes" and lock_box_code else None
                         safety_alarm_code_escaped = safety_alarm_code.replace("'", "''") if has_safety_alarm == "Yes" and safety_alarm_code else None
                         how_heard_value_escaped = how_heard_value.replace("'", "''") if how_heard_value else None
@@ -1222,9 +1227,9 @@ def customer_management():
                                 '{name.replace("'", "''")}',
                                 '{phone.replace("'", "''")}',
                                 {f"'{email_escaped}'" if email else 'NULL'},
-                                '{address.replace("'", "''")}',
-                                {f"'{unit_escaped}'" if unit else 'NULL'},
-                                '{city.replace("'", "''")}',
+                                '{ADDRESS.replace("'", "''")}',
+                                {f"'{UNIT_escaped}'" if UNIT else 'NULL'},
+                                '{CITY.replace("'", "''")}',
                                 '{state}',
                                 '{zipcode}',
                                 '{has_lock_box}',
@@ -1234,12 +1239,12 @@ def customer_management():
                                 {f"'{how_heard_value_escaped}'" if how_heard_value else 'NULL'},
                                 {f"'{note_escaped}'" if note else 'NULL'},
                                 {f"'{entrance_note_escaped}'" if entrance_note else 'NULL'},
-                                '{outdoor_unit_model.replace("'", "''")}',
-                                '{outdoor_unit_serial.replace("'", "''")}',
-                                '{indoor_unit_model.replace("'", "''")}',
-                                '{indoor_unit_serial.replace("'", "''")}',
+                                '{outdoor_UNIT_model.replace("'", "''")}',
+                                '{outdoor_UNIT_serial.replace("'", "''")}',
+                                '{indoor_UNIT_model.replace("'", "''")}',
+                                '{indoor_UNIT_serial.replace("'", "''")}',
                                 '{thermostat_type.replace("'", "''")}',
-                                '{unit_location}',
+                                '{UNIT_location}',
                                 '{accessibility_level}',
                                 '',
                                 ''
@@ -1260,7 +1265,7 @@ def customer_management():
                                         'DOC{datetime.now().timestamp()}',
                                         '{customer_id}',
                                         'IMAGE',
-                                        'Unit Picture - {uploaded_file.name}',
+                                        'UNIT Picture - {uploaded_file.name}',
                                         '{encoded_file}'
                                     )
                                 """).collect()
@@ -1272,9 +1277,9 @@ def customer_management():
                             'name': '',
                             'phone': '',
                             'email': '',
-                            'address': '',
-                            'unit': '',
-                            'city': '',
+                            'ADDRESS': '',
+                            'UNIT': '',
+                            'CITY': '',
                             'state': 'MD',
                             'zipcode': '',
                             'has_lock_box': 'No',
@@ -1285,12 +1290,12 @@ def customer_management():
                             'friend_name': '',
                             'note': '',
                             'entrance_note': '',
-                            'outdoor_unit_model': '',
-                            'outdoor_unit_serial': '',
-                            'indoor_unit_model': '',
-                            'indoor_unit_serial': '',
+                            'outdoor_UNIT_model': '',
+                            'outdoor_UNIT_serial': '',
+                            'indoor_UNIT_model': '',
+                            'indoor_UNIT_serial': '',
                             'thermostat_type': '',
-                            'unit_location': 'Attic',
+                            'UNIT_location': 'Attic',
                             'accessibility_level': 'Easy'
                         }
                         
@@ -1301,19 +1306,40 @@ def customer_management():
 
     # --- Customer Search and Display Section ---
     st.subheader("🔍 Search Customers")
-    search_term = st.text_input("", placeholder="Search by name, phone, email, or address", key="unified_search")
+    search_term = st.text_input("", placeholder="Search by name, phone, email, or ADDRESS", key="unified_search")
     
     if search_term:
-        customers = session.sql(f"""
-            SELECT c.* FROM customers c
-            WHERE c.NAME ILIKE '%{search_term}%' 
-               OR c.PHONE ILIKE '%{search_term}%'
-               OR c.EMAIL ILIKE '%{search_term}%'
-               OR c.ADDRESS ILIKE '%{search_term}%'
-            ORDER BY c.NAME
-        """).collect()
+# In customer_management() function
+     customers = session.sql(f"""
+    SELECT 
+        c.customerid AS CUSTOMERID,
+        c.name AS NAME,
+        c.phone AS PHONE,
+        c.email AS EMAIL,
+        c.address AS ADDRESS,
+        c.unit AS UNIT,
+        c.city AS CITY,
+        c.state AS STATE,
+        c.zipcode AS ZIPCODE,
+        c.has_lock_box AS HAS_LOCK_BOX,
+        c.lock_box_code AS LOCK_BOX_CODE,
+        c.has_safety_alarm AS HAS_SAFETY_ALARM,
+        c.safety_alarm AS SAFETY_ALARM,
+        c.how_heard AS HOW_HEARD,
+        c.note AS NOTE,
+        c.entrance_note AS ENTRANCE_NOTE,
+        c.outdoor_unit_model AS OUTDOOR_UNIT_MODEL,
+        c.outdoor_unit_serial_number AS OUTDOOR_UNIT_SERIAL_NUMBER,
+        c.indoor_unit_model AS INDOOR_UNIT_MODEL,
+        c.indoor_unit_serial_number AS INDOOR_UNIT_SERIAL_NUMBER,
+        c.thermostat_type AS THERMOSTAT_TYPE,
+        c.unit_location AS UNIT_LOCATION,
+        c.accessibility_level AS ACCESSIBILITY_LEVEL
+    FROM customers c
+    WHERE ... 
+  """).collect()
         
-        if customers:
+     if customers:
             for customer in customers:
                 # Convert Row to dictionary safely
                 try:
@@ -1336,11 +1362,11 @@ def customer_management():
                         st.write(f"**Customer ID:** {customer_dict['CUSTOMERID']}")
                         st.write(f"**Email:** {customer_dict.get('EMAIL', 'Not provided')}")
                         
-                        # Address display with Google Maps link
-                        full_address = f"{customer_dict['ADDRESS']}, {customer_dict['CITY']}, {customer_dict['STATE']} {customer_dict['ZIPCODE']}"
-                        maps_url = f"https://www.google.com/maps/search/?api=1&query={full_address.replace(' ', '+')}"
+                        # ADDRESS display with Google Maps link
+                        full_ADDRESS = f"{customer_dict['ADDRESS']}, {customer_dict['CITY']}, {customer_dict['STATE']} {customer_dict['ZIPCODE']}"
+                        maps_url = f"https://www.google.com/maps/search/?api=1&query={full_ADDRESS.replace(' ', '+')}"
                         st.markdown(f"""
-                            **Address:** <a href="{maps_url}" target="_blank" style="color: blue; text-decoration: none;">
+                            **ADDRESS:** <a href="{maps_url}" target="_blank" style="color: blue; text-decoration: none;">
                             {customer_dict['ADDRESS']}{', ' + customer_dict['UNIT'] if customer_dict.get('UNIT') else ''}<br>
                             {customer_dict['CITY']}, {customer_dict['STATE']} {customer_dict['ZIPCODE']}.
                             </a>
@@ -1381,7 +1407,7 @@ def customer_management():
                         FROM appointments a
                         JOIN employees e ON a.technicianid = e.employeeid
                         WHERE a.customerid = '{customer_dict['CUSTOMERID']}'
-                        ORDER BY a.scheduled_time DESC
+                        ORDER BY a.SCHEDULED_TIME DESC
                     """).collect()
                     
                     if appointments:
@@ -1391,7 +1417,7 @@ def customer_management():
                             with cols[0]:
                                 st.write(f"**{appt['SCHEDULED_TIME'].strftime('%Y-%m-%d %I:%M %p')}**")
                             with cols[1]:
-                                st.write(f"{appt['SERVICE_TYPE']} ({appt['STA_TUS']})")
+                                st.write(f"{appt['SERVICE_TYPE']} ({appt['status']})")
                                 st.write(f"Technician: {appt['TECHNICIAN_NAME']}")
                             with cols[2]:
                                 if st.button("View Details", key=f"appt_details_{appt['APPOINTMENTID']}"):
@@ -1403,9 +1429,9 @@ def customer_management():
                     st.subheader("Equipment Information")
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.write(f"**Outdoor Unit:** {customer_dict.get('OUTDOOR_UNIT_MODEL', 'N/A')}")
+                        st.write(f"**Outdoor UNIT:** {customer_dict.get('OUTDOOR_UNIT_MODEL', 'N/A')}")
                         st.write(f"**Serial #:** {customer_dict.get('OUTDOOR_UNIT_SERIAL_NUMBER', 'N/A')}")
-                        st.write(f"**Indoor Unit:** {customer_dict.get('INDOOR_UNIT_MODEL', 'N/A')}")
+                        st.write(f"**Indoor UNIT:** {customer_dict.get('INDOOR_UNIT_MODEL', 'N/A')}")
                         st.write(f"**Serial #:** {customer_dict.get('INDOOR_UNIT_SERIAL_NUMBER', 'N/A')}")
                     with col2:
                         st.write(f"**Thermostat:** {customer_dict.get('THERMOSTAT_TYPE', 'N/A')}")
@@ -1413,7 +1439,7 @@ def customer_management():
                         st.write(f"**Accessibility:** {customer_dict.get('ACCESSIBILITY_LEVEL', 'N/A')}")
                     
                     # Display uploaded pictures
-                    st.subheader("Unit Pictures")
+                    st.subheader("UNIT Pictures")
                     docs = session.sql(f"""
                     SELECT DOC_ID, DESCRIPTION, UPLOADED_AT 
                     FROM customer_documents 
@@ -1444,7 +1470,7 @@ def customer_management():
                                     except:
                                         st.error("Could not display image")
                     else:
-                      st.info("No unit pictures available")
+                      st.info("No UNIT pictures available")
 
 
     
@@ -1465,11 +1491,11 @@ def customer_management():
                             st.session_state['add_picture_customer'] = customer_dict['CUSTOMERID']
                             st.rerun()
 
-    # --- Add Unit Picture Section ---
+    # --- Add UNIT Picture Section ---
     if 'add_picture_customer' in st.session_state:
-        st.subheader(f"Add Unit Picture for Customer {st.session_state['add_picture_customer']}")
+        st.subheader(f"Add UNIT Picture for Customer {st.session_state['add_picture_customer']}")
         
-        uploaded_file = st.file_uploader("Upload picture of the HVAC unit", type=['jpg', 'jpeg', 'png'])
+        uploaded_file = st.file_uploader("Upload picture of the HVAC UNIT", type=['jpg', 'jpeg', 'png'])
         description = st.text_input("Picture Description")
         
         col1, col2 = st.columns(2)
@@ -1543,10 +1569,10 @@ def customer_management():
                 
                 # Get already booked installation days
                 booked_days = session.sql(f"""
-                    SELECT DISTINCT DATE(scheduled_time) as day 
+                    SELECT DISTINCT DATE(SCHEDULED_TIME) as day 
                     FROM appointments 
-                    WHERE service_type = 'Install'
-                    AND DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=28)}'
+                    WHERE SERVICE_TYPE = 'Install'
+                    AND DATE(SCHEDULED_TIME) BETWEEN '{start_date}' AND '{start_date + timedelta(days=28)}'
                 """).collect()
                 booked_days = [row['DAY'] for row in booked_days]
                 
@@ -1596,7 +1622,7 @@ def customer_management():
                             session.sql(f"""
                                 INSERT INTO appointments (
                                     appointmentid, customerid, technicianid,
-                                    scheduled_time, service_type, notes, sta_tus
+                                    SCHEDULED_TIME, SERVICE_TYPE, notes, status
                                 ) VALUES (
                                     'APT{datetime.now().timestamp()}',
                                     '{st.session_state['selected_customer_id']}',
@@ -1613,7 +1639,7 @@ def customer_management():
                                 session.sql(f"""
                                     INSERT INTO appointments (
                                         appointmentid, customerid, technicianid,
-                                        scheduled_time, service_type, notes, sta_tus
+                                        SCHEDULED_TIME, SERVICE_TYPE, notes, status
                                     ) VALUES (
                                         'APT{datetime.now().timestamp()}',
                                         '{st.session_state['selected_customer_id']}',
@@ -1661,8 +1687,8 @@ def customer_management():
                 # Get existing appointments
                 appointments = session.sql(f"""
                     SELECT * FROM appointments
-                    WHERE DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
-                    AND sta_tus != 'cancelled'
+                    WHERE DATE(SCHEDULED_TIME) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
+                    AND status != 'cancelled'
                 """).collect()
                 
                 # Create calendar with 2-hour slots (8AM-6PM)
@@ -1744,9 +1770,9 @@ def customer_management():
                             existing = session.sql(f"""
                                 SELECT * FROM appointments
                                 WHERE technicianid = '{primary_tech}'
-                                AND DATE(scheduled_time) = '{slot['datetime'].date()}'
-                                AND HOUR(scheduled_time) = {slot['datetime'].hour}
-                                AND sta_tus != 'cancelled'
+                                AND DATE(SCHEDULED_TIME) = '{slot['datetime'].date()}'
+                                AND HOUR(SCHEDULED_TIME) = {slot['datetime'].hour}
+                                AND status != 'cancelled'
                             """).collect()
                             
                             if existing:
@@ -1758,7 +1784,7 @@ def customer_management():
                             session.sql(f"""
                                 INSERT INTO appointments (
                                     appointmentid, customerid, technicianid, 
-                                    scheduled_time, service_type, notes, sta_tus
+                                    SCHEDULED_TIME, SERVICE_TYPE, notes, status
                                 ) VALUES (
                                     'APT{datetime.now().timestamp()}',
                                     '{st.session_state['selected_customer_id']}',
@@ -1775,7 +1801,7 @@ def customer_management():
                                 session.sql(f"""
                                     INSERT INTO appointments (
                                         appointmentid, customerid, technicianid, 
-                                        scheduled_time, service_type, notes, sta_tus
+                                        SCHEDULED_TIME, SERVICE_TYPE, notes, status
                                     ) VALUES (
                                         'APT{datetime.now().timestamp()}',
                                         '{st.session_state['selected_customer_id']}',
@@ -1819,11 +1845,11 @@ def customer_management():
                 name = st.text_input("Full Name*", value=customer_to_edit['NAME'])
                 phone = st.text_input("Phone*", value=customer_to_edit['PHONE'])
                 email = st.text_input("Email", value=customer_to_edit.get('EMAIL', ''))
-                address = st.text_input("Street Address*", value=customer_to_edit['ADDRESS'])
-                unit = st.text_input("Unit/Apt", value=customer_to_edit.get('UNIT', ''))
+                ADDRESS = st.text_input("Street ADDRESS*", value=customer_to_edit['ADDRESS'])
+                UNIT = st.text_input("UNIT/Apt", value=customer_to_edit.get('UNIT', ''))
                 
             with col2:
-                city = st.text_input("City*", value=customer_to_edit['CITY'])
+                CITY = st.text_input("CITY*", value=customer_to_edit['CITY'])
                 state = st.selectbox("State*", ["MD", "DC", "VA"], 
                                    index=["MD", "DC", "VA"].index(customer_to_edit['STATE']))
                 zipcode = st.text_input("Zip Code*", value=customer_to_edit['ZIPCODE'])
@@ -1876,15 +1902,15 @@ def customer_management():
             st.subheader("Equipment Information")
             col1, col2 = st.columns(2)
             with col1:
-                outdoor_unit_model = st.text_input("Outdoor Unit Model", value=customer_to_edit.get('OUTDOOR_UNIT_MODEL', ''))
-                outdoor_unit_serial = st.text_input("Outdoor Unit Serial Number", value=customer_to_edit.get('OUTDOOR_UNIT_SERIAL_NUMBER', ''))
-                indoor_unit_model = st.text_input("Indoor Unit Model", value=customer_to_edit.get('INDOOR_UNIT_MODEL', ''))
-                indoor_unit_serial = st.text_input("Indoor Unit Serial Number", value=customer_to_edit.get('INDOOR_UNIT_SERIAL_NUMBER', ''))
+                outdoor_UNIT_model = st.text_input("Outdoor UNIT Model", value=customer_to_edit.get('OUTDOOR_UNIT_MODEL', ''))
+                outdoor_UNIT_serial = st.text_input("Outdoor UNIT Serial Number", value=customer_to_edit.get('OUTDOOR_UNIT_SERIAL_NUMBER', ''))
+                indoor_UNIT_model = st.text_input("Indoor UNIT Model", value=customer_to_edit.get('INDOOR_UNIT_MODEL', ''))
+                indoor_UNIT_serial = st.text_input("Indoor UNIT Serial Number", value=customer_to_edit.get('INDOOR_UNIT_SERIAL_NUMBER', ''))
                 
             with col2:
                 thermostat_type = st.text_input("Thermostat Type", value=customer_to_edit.get('THERMOSTAT_TYPE', ''))
-                unit_location = st.selectbox(
-                    "Unit Location",
+                UNIT_location = st.selectbox(
+                    "UNIT Location",
                     ["Attic", "Basement", "Garage", "Closet", "Crawlspace", "Other"],
                     index=["Attic", "Basement", "Garage", "Closet", "Crawlspace", "Other"].index(
                         customer_to_edit.get('UNIT_LOCATION', 'Attic'))
@@ -1905,7 +1931,7 @@ def customer_management():
             with col1:
                 if st.form_submit_button("💾 Save Changes"):
                     # Validate inputs
-                    if not all([name, phone, address, city, state, zipcode]):
+                    if not all([name, phone, ADDRESS, CITY, state, zipcode]):
                         st.error("Please fill in all required fields (*)")
                     elif not re.match(r"^\d{3}-\d{3}-\d{4}$", phone):
                         st.error("Invalid phone number format. Please use ###-###-####")
@@ -1924,7 +1950,7 @@ def customer_management():
                             
                             # Prepare SQL values with proper escaping
                             email_escaped = email.replace("'", "''") if email else None
-                            unit_escaped = unit.replace("'", "''") if unit else None
+                            UNIT_escaped = UNIT.replace("'", "''") if UNIT else None
                             lock_box_code_escaped = lock_box_code.replace("'", "''") if has_lock_box == "Yes" and lock_box_code else None
                             safety_alarm_code_escaped = safety_alarm_code.replace("'", "''") if has_safety_alarm == "Yes" and safety_alarm_code else None
                             how_heard_value_escaped = how_heard_value.replace("'", "''") if how_heard_value else None
@@ -1937,9 +1963,9 @@ def customer_management():
                                 SET NAME = '{name.replace("'", "''")}',
                                     PHONE = '{phone.replace("'", "''")}',
                                     EMAIL = {f"'{email_escaped}'" if email else 'NULL'},
-                                    ADDRESS = '{address.replace("'", "''")}',
-                                    UNIT = {f"'{unit_escaped}'" if unit else 'NULL'},
-                                    CITY = '{city.replace("'", "''")}',
+                                    ADDRESS = '{ADDRESS.replace("'", "''")}',
+                                    UNIT = {f"'{UNIT_escaped}'" if UNIT else 'NULL'},
+                                    CITY = '{CITY.replace("'", "''")}',
                                     STATE = '{state}',
                                     ZIPCODE = '{zipcode}',
                                     HAS_LOCK_BOX = '{has_lock_box}',
@@ -1949,12 +1975,12 @@ def customer_management():
                                     HOW_HEARD = {f"'{how_heard_value_escaped}'" if how_heard_value else 'NULL'},
                                     NOTE = {f"'{note_escaped}'" if note else 'NULL'},
                                     ENTRANCE_NOTE = {f"'{entrance_note_escaped}'" if entrance_note else 'NULL'},
-                                    OUTDOOR_UNIT_MODEL = '{outdoor_unit_model.replace("'", "''")}',
-                                    OUTDOOR_UNIT_SERIAL_NUMBER = '{outdoor_unit_serial.replace("'", "''")}',
-                                    INDOOR_UNIT_MODEL = '{indoor_unit_model.replace("'", "''")}',
-                                    INDOOR_UNIT_SERIAL_NUMBER = '{indoor_unit_serial.replace("'", "''")}',
+                                    OUTDOOR_UNIT_MODEL = '{outdoor_UNIT_model.replace("'", "''")}',
+                                    OUTDOOR_UNIT_SERIAL_NUMBER = '{outdoor_UNIT_serial.replace("'", "''")}',
+                                    INDOOR_UNIT_MODEL = '{indoor_UNIT_model.replace("'", "''")}',
+                                    INDOOR_UNIT_SERIAL_NUMBER = '{indoor_UNIT_serial.replace("'", "''")}',
                                     THERMOSTAT_TYPE = '{thermostat_type.replace("'", "''")}',
-                                    UNIT_LOCATION = '{unit_location}',
+                                    UNIT_LOCATION = '{UNIT_location}',
                                     ACCESSIBILITY_LEVEL = '{accessibility_level}'
                                 WHERE CUSTOMERID = '{edit_customer_id}'
                             """
@@ -1987,7 +2013,7 @@ def appointments():
 
     # --- Step 1: Customer Selection ---
     st.subheader("1. Select Customer")
-    search_query = st.text_input("Search by Name, Phone, Email, or Address", key="customer_search")
+    search_query = st.text_input("Search by Name, Phone, Email, or ADDRESS", key="customer_search")
     
     # Fetch customers
     customers = session.sql(f"""
@@ -2038,10 +2064,10 @@ def appointments():
         
         # Get already booked installation days
         booked_days = session.sql(f"""
-            SELECT DISTINCT DATE(scheduled_time) as day 
+            SELECT DISTINCT DATE(SCHEDULED_TIME) as day 
             FROM appointments 
-            WHERE service_type = 'Install'
-            AND DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=28)}'
+            WHERE SERVICE_TYPE = 'Install'
+            AND DATE(SCHEDULED_TIME) BETWEEN '{start_date}' AND '{start_date + timedelta(days=28)}'
         """).collect()
         booked_days = [row['DAY'] for row in booked_days]
         
@@ -2090,7 +2116,7 @@ def appointments():
                     session.sql(f"""
                         INSERT INTO appointments (
                             appointmentid, customerid, technicianid,
-                            scheduled_time, service_type, notes, sta_tus
+                            SCHEDULED_TIME, SERVICE_TYPE, notes, status
                         ) VALUES (
                             'APT{datetime.now().timestamp()}',
                             '{selected_customer_id}',
@@ -2107,7 +2133,7 @@ def appointments():
                         session.sql(f"""
                             INSERT INTO appointments (
                                 appointmentid, customerid, technicianid,
-                                scheduled_time, service_type, notes, sta_tus
+                                SCHEDULED_TIME, SERVICE_TYPE, notes, status
                             ) VALUES (
                                 'APT{datetime.now().timestamp()}',
                                 '{selected_customer_id}',
@@ -2153,8 +2179,8 @@ def appointments():
         # Get existing appointments
         appointments = session.sql(f"""
             SELECT * FROM appointments
-            WHERE DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
-            AND sta_tus != 'cancelled'
+            WHERE DATE(SCHEDULED_TIME) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
+            AND status != 'cancelled'
         """).collect()
         
         # Create calendar with 2-hour slots (8AM-6PM)
@@ -2234,9 +2260,9 @@ def appointments():
                     existing = session.sql(f"""
                         SELECT * FROM appointments
                         WHERE technicianid = '{primary_tech}'
-                        AND DATE(scheduled_time) = '{slot['datetime'].date()}'
-                        AND HOUR(scheduled_time) = {slot['datetime'].hour}
-                        AND sta_tus != 'cancelled'
+                        AND DATE(SCHEDULED_TIME) = '{slot['datetime'].date()}'
+                        AND HOUR(SCHEDULED_TIME) = {slot['datetime'].hour}
+                        AND status != 'cancelled'
                     """).collect()
                     
                     if existing:
@@ -2248,7 +2274,7 @@ def appointments():
                     session.sql(f"""
                         INSERT INTO appointments (
                             appointmentid, customerid, technicianid, 
-                            scheduled_time, service_type, notes, sta_tus
+                            SCHEDULED_TIME, SERVICE_TYPE, notes, status
                         ) VALUES (
                             'APT{datetime.now().timestamp()}',
                             '{selected_customer_id}',
@@ -2265,7 +2291,7 @@ def appointments():
                         session.sql(f"""
                             INSERT INTO appointments (
                                 appointmentid, customerid, technicianid, 
-                                scheduled_time, service_type, notes, sta_tus
+                                SCHEDULED_TIME, SERVICE_TYPE, notes, status
                             ) VALUES (
                                 'APT{datetime.now().timestamp()}',
                                 '{selected_customer_id}',
@@ -2291,15 +2317,15 @@ def appointments():
             a.appointmentid,
             c.name as customer_name,
             e.ename as technician_name,
-            a.scheduled_time,
-            a.service_type,
-            a.sta_tus,
+            a.SCHEDULED_TIME,
+            a.SERVICE_TYPE,
+            a.status,
             a.notes
         FROM appointments a
         JOIN customers c ON a.customerid = c.customerid
         JOIN employees e ON a.technicianid = e.employeeid
-        WHERE DATE(a.scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
-        ORDER BY a.scheduled_time
+        WHERE DATE(a.SCHEDULED_TIME) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
+        ORDER BY a.SCHEDULED_TIME
     """).collect()
     
     if current_appts:
@@ -2314,7 +2340,7 @@ def appointments():
                 "Customer": appt['CUSTOMER_NAME'],
                 "Technician": appt['TECHNICIAN_NAME'],
                 "Service": appt['SERVICE_TYPE'],
-                "Status": appt['STA_TUS']
+                "Status": appt['status']
             })
         
         st.dataframe(
