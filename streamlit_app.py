@@ -21,22 +21,24 @@ def get_session():
         # First, try to get the active session (works inside Snowflake)
         return sp.context.get_active_session()
     except:
+        # Try direct connection with explicit parameters
+        conn_params = {
+            "account": "ACYRHOY-MR97012",
+            "user": "DIBA",
+            "password": "Potomachvac200$",
+            "role": "SYSADMIN",
+            "warehouse": "COMPUTE_WH",
+            "database": "POTOMAC_HVAC",
+            "schema": "PUBLIC",
+            "client_session_keep_alive": True
+        }
         try:
-            # Try Streamlit secrets (for Streamlit Cloud)
-            conn_config = st.secrets["connections.snowflake"]
-            return Session.builder.configs(conn_config).create()
-        except KeyError:
-            # Fallback to local environment variables (for local development)
-            return Session.builder.configs({
-                "account": os.getenv("ACYRHOY-MR97012"),
-                "user": os.getenv("DIBA"),
-                "password": os.getenv("Potomachvac200$"),
-                "role": os.getenv("SNOWFLAKE_ROLE", "SYSADMIN"),
-                "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
-                "database": os.getenv("SNOWFLAKE_DATABASE", "POTOMAC_HVAC"),
-                "schema": os.getenv("SNOWFLAKE_SCHEMA", "PUBLIC"),
-                "client_session_keep_alive": True
-            }).create()
+            return Session.builder.configs(conn_params).create()
+        except Exception as e:
+            st.error(f"Error creating Snowflake session: {str(e)}")
+            st.stop()
+
+
 
 # Role-based access control
 ROLE_ACCESS = {
