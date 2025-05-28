@@ -1,28 +1,25 @@
 import streamlit as st
-from snowflake.snowpark.context import get_active_session
-import streamlit.components.v1 as components
-import snowflake.snowpark as sp
 from snowflake.snowpark import Session
+import snowflake.snowpark as sp
 from datetime import datetime, timedelta, time
 import pandas as pd
-
-import snowflake.snowpark as sp
-from snowflake.snowpark.functions import col
 import re
 import uuid
 import hashlib
 import base64
-# Add this helper function with your imports
 from PIL import Image, ImageOps
 import io
 import requests
 
-
-##########################################################################################
-
 # Initialize Snowflake connection
 def get_session():
-    return sp.context.get_active_session()
+    try:
+        # First, try to get the active session (works inside Snowflake)
+        return sp.context.get_active_session()
+    except:
+        # If that fails, create a new session using credentials from Streamlit secrets
+        conn_config = st.secrets["connections.snowflake"]
+        return Session.builder.configs(conn_config).create()
 
 # Role-based access control
 ROLE_ACCESS = {
