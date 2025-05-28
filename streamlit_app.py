@@ -1,78 +1,25 @@
-# Import python packages
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
-
-# Get the current credentials
-
-# Replace existing session initialization code with:
-def get_session():
-    if 'snowpark_session' not in st.session_state:
-        # For Streamlit Cloud deployment
-        ctx = st.connection("snowflake")
-        st.session_state.snowpark_session = ctx.session()
-    return st.session_state.snowpark_session
-
-session = get_session()  # Use this session everywhere
-
+session = get_active_session()
 import streamlit.components.v1 as components
-import streamlit as st
 import snowflake.snowpark as sp
 from snowflake.snowpark import Session
 from datetime import datetime, timedelta, time
-import re
-import uuid
-import hashlib
-from PIL import Image, ImageOps
-import io
-import base64
 import pandas as pd
 
-
+import snowflake.snowpark as sp
 from snowflake.snowpark.functions import col
 cnx=st.connection("snowflake")
-session = cnx.session()
-from snowflake.snowpark import Session
-from datetime import datetime, timedelta
 import re
 import uuid
 import hashlib
 import base64
-from PIL import Image
-import io
 # Add this helper function with your imports
 from PIL import Image, ImageOps
 import io
-# Import python packages
-import streamlit as st
-from snowflake.snowpark.functions import col
 import requests
 
 
-##########################################################################################
-##########################################################################################
-##########################################################################################
-
-def crop_to_square(image_bytes):
-    img = Image.open(io.BytesIO(image_bytes))
-    return ImageOps.fit(img, (120, 120))  # Crop to square
-
-def process_image(image_bytes, target_width):
-    """Resize image while maintaining quality and aspect ratio"""
-    img = Image.open(io.BytesIO(image_bytes))
-    
-    # Calculate proportional height
-    width_percent = (target_width / float(img.size[0]))
-    height = int((float(img.size[1]) * float(width_percent)))
-    
-    # High-quality resizing
-    img = img.resize((target_width, height), Image.Resampling.LANCZOS)
-    
-    # Convert back to bytes
-    buffer = io.BytesIO()
-    img.save(buffer, format="JPEG", quality=95)  # 95% quality
-    return buffer.getvalue()
-
-##########################################################################################
 ##########################################################################################
 
 # Initialize Snowflake connection
@@ -81,9 +28,9 @@ def get_session():
 
 # Role-based access control
 ROLE_ACCESS = {
-    'admin': ['Home', 'profile', 'customers', 'appointments', 'quotes', 'invoices', 'payments', 'reports', 'analytics', 'admin_tables', 'equipment'],
+    'admin': ['Home', 'profile', 'customers', 'appointments', 'admin_tables','quote'],
     'office': ['Home', 'customers', 'appointments', 'equipment'],
-    'technician': ['Home', 'profile', 'quotes', 'invoices', 'payments', 'equipment'],
+    'technician': ['Home', 'profile'],
     'driver': ['Home', 'profile', 'driver_tasks']
 }
 ##########################################################################################
@@ -625,6 +572,7 @@ def Home():
             # Create Google Maps link
             maps_url = f"https://www.google.com/maps/search/?api=1&query={full_address.replace(' ', '+')}"
             
+
             # Expandable section for detailed customer info
             with st.expander(f"**{appt['CUSTOMER_NAME']}** - {appt['ADDRESS']}, {appt['CITY']}"):
                 # Clickable address link
@@ -1350,9 +1298,6 @@ def customer_management():
                         st.error(f"Error adding customer: {str(e)}")
 
     # --- Customer Search and Display Section ---
-    
-
-    
     st.subheader("🔍 Search Customers")
     search_term = st.text_input("", placeholder="Search by name, phone, email, or address", key="unified_search")
     
@@ -1379,9 +1324,10 @@ def customer_management():
                                             'INDOOR_UNIT_SERIAL_NUMBER', 'THERMOSTAT_TYPE', 'UNIT_LOCATION', 
                                             'ACCESSIBILITY_LEVEL', 'ACCESSIBILITY_NOTES', 'OTHER_NOTES'], customer))
                 
-                with st.expander(f"{customer_dict['NAME']} - {customer_dict['PHONE']}"):
+                with st.container():
+                    st.subheader(f"{customer_dict['NAME']} - {customer_dict['PHONE']}")
+                    
                     # Customer Information
-                    st.subheader("Customer Information")
                     col1, col2 = st.columns(2)
                     
                     with col1:
@@ -1420,6 +1366,7 @@ def customer_management():
                         )
                         if has_safety_alarm == 'Yes' and not safety_alarm_code:
                             st.error("Safety alarm code is required when safety alarm is present")
+                            pass
                     
                     st.write(f"**How Heard:** {customer_dict.get('HOW_HEARD', 'Not specified')}")
                     st.write(f"**General Note:** {customer_dict.get('NOTE', 'None')}")
@@ -1437,23 +1384,68 @@ def customer_management():
                     
                     if appointments:
                         for appt in appointments:
-                            try:
-                                appt_dict = appt.as_dict() if hasattr(appt, 'as_dict') else dict(zip(appt._fields, appt))
-                                with st.expander(f"{appt_dict['SCHEDULED_TIME'].strftime('%Y-%m-%d %I:%M %p')} - {appt_dict['SERVICE_TYPE']} ({appt_dict['STA_TUS']})"):
-                                    st.write(f"**Technician:** {appt_dict['TECHNICIAN_NAME']}")
-                                    st.write(f"**Service Type:** {appt_dict['SERVICE_TYPE']}")
-                                    st.write(f"**Status:** {appt_dict['STA_TUS']}")
-                                    if appt_dict.get('NOTES'):
-                                        st.write(f"**Notes:** {appt_dict['NOTES']}")
-                            except:
-                                pass
+                            # CHANGED: Use columns instead of expander for appointments
+                            cols = st.columns([1,2,1])
+                            with cols[0]:
+                                st.write(f"**{appt['SCHEDULED_TIME'].strftime('%Y-%m-%d %I:%M %p')}**")
+                            with cols[1]:
+                                st.write(f"{appt['SERVICE_TYPE']} ({appt['STA_TUS']})")
+                                st.write(f"Technician: {appt['TECHNICIAN_NAME']}")
+                            with cols[2]:
+                                if st.button("View Details", key=f"appt_details_{appt['APPOINTMENTID']}"):
+                                    st.session_state['view_appt'] = appt['APPOINTMENTID']
                     else:
                         st.info("No appointments scheduled for this customer")
                     
                     # Equipment Information
                     st.subheader("Equipment Information")
-                    # ... [rest of equipment info display remains the same] ...
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**Outdoor Unit:** {customer_dict.get('OUTDOOR_UNIT_MODEL', 'N/A')}")
+                        st.write(f"**Serial #:** {customer_dict.get('OUTDOOR_UNIT_SERIAL_NUMBER', 'N/A')}")
+                        st.write(f"**Indoor Unit:** {customer_dict.get('INDOOR_UNIT_MODEL', 'N/A')}")
+                        st.write(f"**Serial #:** {customer_dict.get('INDOOR_UNIT_SERIAL_NUMBER', 'N/A')}")
+                    with col2:
+                        st.write(f"**Thermostat:** {customer_dict.get('THERMOSTAT_TYPE', 'N/A')}")
+                        st.write(f"**Location:** {customer_dict.get('UNIT_LOCATION', 'N/A')}")
+                        st.write(f"**Accessibility:** {customer_dict.get('ACCESSIBILITY_LEVEL', 'N/A')}")
                     
+                    # Display uploaded pictures
+                    st.subheader("Unit Pictures")
+                    docs = session.sql(f"""
+                    SELECT DOC_ID, DESCRIPTION, UPLOADED_AT 
+                    FROM customer_documents 
+                    WHERE CUSTOMERID = '{customer_dict['CUSTOMERID']}'
+                    AND DOC_TYPE = 'IMAGE'
+                    ORDER BY UPLOADED_AT DESC
+                    """).collect()
+
+                    if docs:
+                        # Display images in columns
+                        cols = st.columns(min(3, len(docs)))
+                        for i, doc in enumerate(docs):
+                            with cols[i % 3]:
+                                # Retrieve full image data
+                                img_data = session.sql(f"""
+                                SELECT DOC_DATA FROM customer_documents
+                                WHERE DOC_ID = '{doc['DOC_ID']}'
+                                """).collect()[0]['DOC_DATA']
+                                
+                                if img_data:
+                                    try:
+                                        # Display image with use_container_width instead of use_column_width
+                                        img = Image.open(io.BytesIO(base64.b64decode(img_data)))
+                                        st.image(img, 
+                                                 caption=doc['DESCRIPTION'], 
+                                                 use_container_width=True)  # This is the fixed parameter
+                                        st.caption(f"{doc['UPLOADED_AT'].strftime('%Y-%m-%d')}")
+                                    except:
+                                        st.error("Could not display image")
+                    else:
+                      st.info("No unit pictures available")
+
+
+    
                     # Action buttons
                     col1, col2, col3 = st.columns(3)
                     with col1:
@@ -1470,7 +1462,6 @@ def customer_management():
                         if st.button("Upload Picture", key=f"pic_{customer_dict['CUSTOMERID']}"):
                             st.session_state['add_picture_customer'] = customer_dict['CUSTOMERID']
                             st.rerun()
-
 
     # --- Add Unit Picture Section ---
     if 'add_picture_customer' in st.session_state:
@@ -1979,11 +1970,15 @@ def customer_management():
                     del st.session_state['edit_customer']
                     del st.session_state['customer_to_edit']
                     st.rerun()
-        
-        
-        
+
+
+
 ############################################################
 #######################################################################
+#######################################################################
+#######################################################################
+
+
 def appointments():
     st.subheader("📅 Appointment Scheduling")
     session = get_session()
@@ -1992,20 +1987,13 @@ def appointments():
     st.subheader("1. Select Customer")
     search_query = st.text_input("Search by Name, Phone, Email, or Address", key="customer_search")
     
-    # Fetch customers with error handling
-    try:
-        customers = session.sql(f"""
-            SELECT customerid, name, phone FROM customers 
-            WHERE NAME ILIKE '%{search_query}%' 
-               OR PHONE ILIKE '%{search_query}%'
-               OR EMAIL ILIKE '%{search_query}%'
-               OR ADDRESS ILIKE '%{search_query}%'
-            ORDER BY name
-        """).collect()
-    except Exception as e:
-        st.error(f"Database error: {str(e)}")
-        return
-
+    # Fetch customers
+    customers = session.sql(f"""
+        SELECT customerid, name, phone FROM customers 
+        {'WHERE NAME ILIKE ' + f"'%{search_query}%'" if search_query else ''}
+        ORDER BY name
+    """).collect()
+    
     if not customers:
         st.warning("No customers found")
         return
@@ -2020,29 +2008,21 @@ def appointments():
     st.subheader("2. Service Request")
     request_type = st.selectbox(
         "Select Request Type",
-        ["Repair", "Maintenance", "Install", "Estimate"],
+        ["Install", "Service", "Estimate"],
         index=0
     )
 
-    # Get qualified technicians with error handling
+    # Get qualified technicians
+    expertise_map = {"Install": "EX1", "Service": "EX2", "Estimate": "EX3"}
+    technicians = session.sql(f"""
+        SELECT e.employeeid, e.ename 
+        FROM employees e
+        JOIN employee_expertise ee ON e.employeeid = ee.employeeid
+        WHERE ee.expertiseid = '{expertise_map[request_type]}'
+    """).collect()
     
-    try:
-        expertise_map = {"Repair": "EX1", 
-            "Maintenance": "EX2", 
-            "Install": "EX3", 
-            "Estimate": "EX4"}
-        technicians = session.sql(f"""
-            SELECT e.employeeid, e.ename 
-            FROM employees e
-            JOIN employee_expertise ee ON e.employeeid = ee.employeeid
-            WHERE ee.expertiseid = '{expertise_map[request_type]}'
-        """).collect()
-    except Exception as e:
-        st.error(f"Error loading technicians: {str(e)}")
-        return
-
     if not technicians:
-        st.error("No qualified technicians available for this service type")
+        st.error("No technicians available")
         return
 
     # --- Different Logic for Install vs Other Services ---
@@ -2054,33 +2034,28 @@ def appointments():
         start_date = datetime.now().date()
         dates = [start_date + timedelta(days=i) for i in range(28)]
         
-        # Get booked installation days
-        try:
-            booked_days = session.sql(f"""
-                SELECT DISTINCT DATE(scheduled_time) as day 
-                FROM appointments 
-                WHERE service_type = 'Install'
-                AND DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=28)}'
-            """).collect()
-            booked_days = [row['DAY'] for row in booked_days]
-        except Exception as e:
-            st.error(f"Error checking availability: {str(e)}")
-            return
-
-        # Display calendar grid
-        st.write("### Available Dates")
+        # Get already booked installation days
+        booked_days = session.sql(f"""
+            SELECT DISTINCT DATE(scheduled_time) as day 
+            FROM appointments 
+            WHERE service_type = 'Install'
+            AND DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=28)}'
+        """).collect()
+        booked_days = [row['DAY'] for row in booked_days]
+        
+        # Display available dates
         cols = st.columns(7)
         for i, date in enumerate(dates):
             with cols[i % 7]:
                 if date in booked_days:
                     st.button(
-                        f"{date.strftime('%m/%d')}",
+                        f"{date.strftime('%a %m/%d')}",
                         disabled=True,
                         key=f"install_day_{date}"
                     )
                 else:
                     if st.button(
-                        f"{date.strftime('%m/%d')}",
+                        f"{date.strftime('%a %m/%d')}",
                         key=f"install_day_{date}"
                     ):
                         st.session_state.selected_install_date = date
@@ -2090,39 +2065,26 @@ def appointments():
             date = st.session_state.selected_install_date
             st.success(f"Selected installation date: {date.strftime('%A, %B %d')}")
             
-            # Technician selection
+            # Select primary technician
             primary_tech = st.selectbox(
                 "Primary Technician",
                 options=[t['EMPLOYEEID'] for t in technicians],
-                format_func=lambda x: next(t['ENAME'] for t in technicians if t['EMPLOYEEID'] == x),
-                key="primary_install_tech"
+                format_func=lambda x: next(t['ENAME'] for t in technicians if t['EMPLOYEEID'] == x)
             )
             
+            # Select secondary technician (optional)
             secondary_techs = [t for t in technicians if t['EMPLOYEEID'] != primary_tech]
             secondary_tech = st.selectbox(
                 "Additional Technician (Optional)",
                 options=[""] + [t['EMPLOYEEID'] for t in secondary_techs],
-                format_func=lambda x: next(t['ENAME'] for t in technicians if t['EMPLOYEEID'] == x) if x else "None",
-                key="secondary_install_tech"
+                format_func=lambda x: next(t['ENAME'] for t in technicians if t['EMPLOYEEID'] == x) if x else "None"
             )
             
             notes = st.text_area("Installation Notes")
             
             if st.button("Book Installation"):
                 try:
-                    # Check availability again
-                    existing = session.sql(f"""
-                        SELECT 1 FROM appointments
-                        WHERE technicianid = '{primary_tech}'
-                        AND DATE(scheduled_time) = '{date}'
-                        LIMIT 1
-                    """).collect()
-                    
-                    if existing:
-                        st.error("Technician no longer available")
-                        st.rerun()
-                    
-                    # Book primary technician
+                    # Book primary technician for full day (8AM-5PM)
                     session.sql(f"""
                         INSERT INTO appointments (
                             appointmentid, customerid, technicianid,
@@ -2133,7 +2095,7 @@ def appointments():
                             '{primary_tech}',
                             '{datetime.combine(date, time(8,0))}',
                             'Install',
-                            '{notes.replace("'", "''")}',
+                            '{notes}',
                             'scheduled'
                         )
                     """).collect()
@@ -2150,7 +2112,7 @@ def appointments():
                                 '{secondary_tech}',
                                 '{datetime.combine(date, time(8,0))}',
                                 'Install-Assist',
-                                '{notes.replace("'", "''")}',
+                                '{notes}',
                                 'scheduled'
                             )
                         """).collect()
@@ -2186,19 +2148,15 @@ def appointments():
         start_date = today + timedelta(weeks=st.session_state.week_offset) - timedelta(days=today.weekday())
         days = [start_date + timedelta(days=i) for i in range(7)]
         
-        # Create calendar with 2-hour slots (8AM-6PM)
-        time_slots = [time(hour) for hour in range(8, 19, 2)]
-        
         # Get existing appointments
-        try:
-            appointments = session.sql(f"""
-                SELECT * FROM appointments
-                WHERE DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
-                AND sta_tus != 'cancelled'
-            """).collect()
-        except Exception as e:
-            st.error(f"Error loading appointments: {str(e)}")
-            return
+        appointments = session.sql(f"""
+            SELECT * FROM appointments
+            WHERE DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
+            AND sta_tus != 'cancelled'
+        """).collect()
+        
+        # Create calendar with 2-hour slots (8AM-6PM)
+        time_slots = [time(hour) for hour in range(8, 19, 2)]  # 8AM, 10AM, 12PM, 2PM, 4PM, 6PM
         
         for day in days:
             with st.expander(day.strftime("%A %m/%d"), expanded=True):
@@ -2209,52 +2167,35 @@ def appointments():
                     slot_end = slot_start + timedelta(hours=2)
                     
                     with cols[i]:
+                        # Check technician availability
                         available_techs = []
                         for tech in technicians:
                             tech_id = tech['EMPLOYEEID']
                             
-                            try:
-                                # Check schedule availability
-                                schedule_available = session.sql(f"""
-                                    SELECT 1 FROM employee_schedules
-                                    WHERE employeeid = '{tech_id}'
-                                    AND schedule_date = '{day}'
-                                    AND start_time <= '{time_slot}'
-                                    AND end_time >= '{(time_slot.hour + 2) % 24}:{time_slot.minute}'
-                                    LIMIT 1
-                                """).collect()
-                                
-                                # Check appointment conflicts
-                                appointment_conflict = session.sql(f"""
-                                    SELECT 1 FROM appointments
-                                    WHERE technicianid = '{tech_id}'
-                                    AND scheduled_time >= '{slot_start}'
-                                    AND scheduled_time < '{slot_end}'
-                                    AND sta_tus != 'cancelled'
-                                    LIMIT 1
-                                """).collect()
-                                
-                                if schedule_available and not appointment_conflict:
-                                    available_techs.append(tech)
-                            except Exception as e:
-                                st.error(f"Error checking availability: {str(e)}")
-                                continue
+                            # Check for overlapping appointments
+                            is_busy = any(
+                                a for a in appointments 
+                                if a['TECHNICIANID'] == tech_id
+                                and datetime.combine(day, a['SCHEDULED_TIME'].time()) < slot_end
+                                and (datetime.combine(day, a['SCHEDULED_TIME'].time()) + timedelta(hours=2)) > slot_start
+                            )
+                            
+                            if not is_busy:
+                                available_techs.append(tech)
                         
+                        # Display time slot (8-10 format)
                         slot_label = f"{time_slot.hour}-{(time_slot.hour+2)%12 or 12}"
                         
                         if available_techs:
                             if st.button(
                                 slot_label,
                                 key=f"slot_{day}_{time_slot}",
-                                help=f"Available: {len(available_techs)} techs",
-                                on_click=lambda d=day, ts=time_slot: st.session_state.update({
-                                    'selected_slot': {
-                                        'datetime': datetime.combine(d, ts),
-                                        'techs': available_techs
-                                    }
-                                })
+                                help="Available: " + ", ".join([t['ENAME'].split()[0] for t in available_techs])
                             ):
-                                pass
+                                st.session_state.selected_slot = {
+                                    'datetime': slot_start,
+                                    'techs': available_techs
+                                }
                         else:
                             st.button(
                                 slot_label,
@@ -2262,46 +2203,46 @@ def appointments():
                                 key=f"slot_{day}_{time_slot}_disabled"
                             )
         
-        # Handle slot selection
+        # Handle slot selection for non-install services
         if 'selected_slot' in st.session_state:
             slot = st.session_state.selected_slot
             time_range = f"{slot['datetime'].hour}-{slot['datetime'].hour+2}"
             st.success(f"Selected: {slot['datetime'].strftime('%A %m/%d')} {time_range}")
             
-            # Technician selection
+            # Primary technician selection
             primary_tech = st.selectbox(
                 "Primary Technician",
                 options=[t['EMPLOYEEID'] for t in slot['techs']],
-                format_func=lambda x: next(t['ENAME'] for t in slot['techs'] if t['EMPLOYEEID'] == x),
-                key=f"primary_{slot['datetime'].timestamp()}"
+                format_func=lambda x: next(t['ENAME'] for t in slot['techs'] if t['EMPLOYEEID'] == x)
             )
             
+            # Secondary technician selection (optional)
             secondary_techs = [t for t in slot['techs'] if t['EMPLOYEEID'] != primary_tech]
             secondary_tech = st.selectbox(
                 "Additional Technician (Optional)",
                 options=[""] + [t['EMPLOYEEID'] for t in secondary_techs],
-                format_func=lambda x: next(t['ENAME'] for t in slot['techs'] if t['EMPLOYEEID'] == x) if x else "None",
-                key=f"secondary_{slot['datetime'].timestamp()}"
+                format_func=lambda x: next(t['ENAME'] for t in slot['techs'] if t['EMPLOYEEID'] == x) if x else "None"
             )
             
             notes = st.text_area("Service Notes")
             
             if st.button("Book Appointment"):
                 try:
-                    # Final availability check
+                    # Check availability again
                     existing = session.sql(f"""
-                        SELECT 1 FROM appointments
+                        SELECT * FROM appointments
                         WHERE technicianid = '{primary_tech}'
-                        AND scheduled_time >= '{slot['datetime']}'
-                        AND scheduled_time < '{slot['datetime'] + timedelta(hours=2)}'
-                        LIMIT 1
+                        AND DATE(scheduled_time) = '{slot['datetime'].date()}'
+                        AND HOUR(scheduled_time) = {slot['datetime'].hour}
+                        AND sta_tus != 'cancelled'
                     """).collect()
                     
                     if existing:
                         st.error("Time slot no longer available")
+                        del st.session_state.selected_slot
                         st.rerun()
                     
-                    # Create appointment
+                    # Book primary technician
                     session.sql(f"""
                         INSERT INTO appointments (
                             appointmentid, customerid, technicianid, 
@@ -2312,11 +2253,12 @@ def appointments():
                             '{primary_tech}',
                             '{slot['datetime']}',
                             '{request_type}',
-                            '{notes.replace("'", "''")}',
+                            '{notes}',
                             'scheduled'
                         )
                     """).collect()
                     
+                    # Book secondary technician if selected
                     if secondary_tech:
                         session.sql(f"""
                             INSERT INTO appointments (
@@ -2328,79 +2270,85 @@ def appointments():
                                 '{secondary_tech}',
                                 '{slot['datetime']}',
                                 '{request_type}-Assist',
-                                '{notes.replace("'", "''")}',
+                                '{notes}',
                                 'scheduled'
                             )
                         """).collect()
                     
-                    st.success("Appointment booked successfully!")
+                    st.success(f"Appointment booked for {time_range}!")
                     del st.session_state.selected_slot
                     st.rerun()
                 
                 except Exception as e:
-                    st.error(f"Error creating appointment: {str(e)}")
+                    st.error(f"Error: {str(e)}")
 
     # --- Current Appointments Display ---
-    st.subheader("📅 Current Appointments This Week")
-    try:
-        current_appts = session.sql(f"""
-            SELECT 
-                a.appointmentid,
-                c.name as customer_name,
-                e.ename as technician_name,
-                a.scheduled_time,
-                a.service_type,
-                a.sta_tus,
-                a.notes
-            FROM appointments a
-            JOIN customers c ON a.customerid = c.customerid
-            JOIN employees e ON a.technicianid = e.employeeid
-            WHERE DATE(a.scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
-            ORDER BY a.scheduled_time
-        """).collect()
+    st.subheader("Current Appointments This Week")
+    current_appts = session.sql(f"""
+        SELECT 
+            a.appointmentid,
+            c.name as customer_name,
+            e.ename as technician_name,
+            a.scheduled_time,
+            a.service_type,
+            a.sta_tus,
+            a.notes
+        FROM appointments a
+        JOIN customers c ON a.customerid = c.customerid
+        JOIN employees e ON a.technicianid = e.employeeid
+        WHERE DATE(a.scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
+        ORDER BY a.scheduled_time
+    """).collect()
+    
+    if current_appts:
+        appt_data = []
+        for appt in current_appts:
+            start = appt['SCHEDULED_TIME']
+            time_range = f"{start.hour}-{start.hour+2}"
+            
+            appt_data.append({
+                "Date": start.strftime('%a %m/%d'),
+                "Time": time_range,
+                "Customer": appt['CUSTOMER_NAME'],
+                "Technician": appt['TECHNICIAN_NAME'],
+                "Service": appt['SERVICE_TYPE'],
+                "Status": appt['STA_TUS']
+            })
         
-        if current_appts:
-            appt_data = []
-            for appt in current_appts:
-                start = appt['SCHEDULED_TIME']
-                time_range = f"{start.hour}-{start.hour+2}"
-                
-                appt_data.append({
-                    "Date": start.strftime('%a %m/%d'),
-                    "Time": time_range,
-                    "Customer": appt['CUSTOMER_NAME'],
-                    "Technician": appt['TECHNICIAN_NAME'],
-                    "Service": appt['SERVICE_TYPE'],
-                    "Status": appt['STA_TUS']
-                })
-            
-            st.dataframe(
-                pd.DataFrame(appt_data),
-                hide_index=True,
-                use_container_width=True,
-                column_config={
-                    "Date": "Date",
-                    "Time": "Time Slot",
-                    "Customer": "Customer",
-                    "Technician": "Technician",
-                    "Service": "Service Type",
-                    "Status": "Status"
-                }
-            )
-        else:
-            st.info("No appointments scheduled for this week")
-            
-    except Exception as e:
-        st.error(f"Error loading appointments: {str(e)}")
+        st.dataframe(
+            pd.DataFrame(appt_data),
+            hide_index=True,
+            use_container_width=True
+        )
+    else:
+        st.info("No appointments scheduled for this week")
 
-    # Navigation controls
-    if st.button("🔄 Refresh Appointments"):
-        st.rerun()
+
+    
+#######################################################################
+#######################################################################
+
+    
+
+
+
+
 
 #######################################################################
 #######################################################################
 
-##################################   
+
+#######################################################################
+#######################################################################             
+
+#######################################################################
+#######################################################################
+#######################################################################
+#######################################################################
+
+#######################################################################
+                  
+#######################################################################   
 #######################################################################
 # Admin Tab: Manage All Tables
 
@@ -2408,11 +2356,11 @@ def admin_tables():
     st.subheader("🛠 Admin Tables")
     session = get_session()
     
-    # List of all tables including the schedule table
+    
     tables = [
-        "employees", "customers", "appointments", "quotes", "jobs", 
-        "invoices", "roles", "employee_roles", "payment_methods", 
-        "payments", "allservices", "equipment", "materials", "employee_schedules"
+        "employees", "customers", "appointments", 
+        "roles", "employee_roles", "expertise", "employee_expertise",
+     "employee_schedules"
     ]
     
     # Select table to manage
