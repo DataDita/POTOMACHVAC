@@ -518,40 +518,46 @@ def Home():
         st.metric("Total Worked Today", time_str)  # Display metric
         st.markdown("---")
 
+
     # --- Upcoming Appointments Section ---
-    st.header("📅 Upcoming Appointments")  # Section header
+    st.header("📅 Upcoming Appointments")
 
-    # Query database for appointments
-    appointments = session.sql(f"""
-        SELECT 
-            a.appointmentid,
-            a.SERVICE_TYPE,
-            a.SCHEDULED_TIME,
-            a.status,
-            c.name AS customer_name,
-            c.ADDRESS,
-            c.UNIT,
-            c.CITY,
-            c.state,
-            c.zipcode,
-            c.has_lock_box,
-            c.lock_box_code,
-            c.has_safety_alarm,
-            c.safety_alarm,
-            c.entrance_note,
-            c.note,
-            c.UNIT_location,
-            c.accessibility_level,
-            c.phone,
-            c.email
-        FROM appointments a
-        JOIN customers c ON a.customerid = c.customerid
-        WHERE a.technicianid = '{st.session_state.user_id}'
-        AND a.SCHEDULED_TIME BETWEEN CURRENT_TIMESTAMP() 
-            AND DATEADD('day', 7, CURRENT_TIMESTAMP())
-        ORDER BY a.SCHEDULED_TIME
-    """).collect()
+    try:
+        # MODIFIED: Added proper table references
+        appointments = session.sql(f"""
+            SELECT 
+                a.appointmentid,
+                a.service_type,
+                a.scheduled_time,
+                a.sta_tus,
+                c.name AS customer_name,
+                c.address,
+                c.unit,
+                c.city,
+                c.state,
+                c.zipcode,
+                c.has_lock_box,
+                c.lock_box_code,
+                c.has_safety_alarm,
+                c.safety_alarm AS safety_alarm_code,  -- FIXED: renamed column
+                c.entrance_note,
+                c.note,
+                c.unit_location,
+                c.accessibility_level,
+                c.phone,
+                c.email
+            FROM appointments a
+            JOIN customers c ON a.customerid = c.customerid
+            WHERE a.technicianid = '{st.session_state.user_id}'
+            AND a.scheduled_time BETWEEN CURRENT_TIMESTAMP() 
+                AND DATEADD('day', 7, CURRENT_TIMESTAMP())
+            ORDER BY a.scheduled_time
+        """).collect()
+    except Exception as e:
+        st.error(f"Error loading appointments: {str(e)}")
+        appointments = []
 
+    # ... rest of the appointment display code ...
     if not appointments:  # Handle no appointments case
         st.info("No upcoming appointments in the next 7 days")
         return
@@ -2761,3 +2767,5 @@ if __name__ == '__main__':
         login_page()
     else:
         main_app()
+
+
