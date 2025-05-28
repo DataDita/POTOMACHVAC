@@ -1,4 +1,5 @@
 import streamlit as st
+from snowflake.snowpark.context import get_active_session
 import streamlit.components.v1 as components
 import snowflake.snowpark as sp
 from snowflake.snowpark import Session
@@ -7,7 +8,6 @@ import pandas as pd
 
 import snowflake.snowpark as sp
 from snowflake.snowpark.functions import col
-cnx=st.connection("snowflake")
 import re
 import uuid
 import hashlib
