@@ -14,8 +14,21 @@ import os
 import traceback
 
 # Initialize Snowflake connection
+# Updated get_session() function with warehouse selection
 def get_session():
-    return sp.context.get_active_session()
+    session = sp.context.get_active_session()
+    
+    # Set the warehouse if not already set
+    try:
+        # Check if warehouse is already set
+        current_wh = session.sql("SELECT CURRENT_WAREHOUSE()").collect()[0][0]
+        if not current_wh:
+            session.sql("USE WAREHOUSE COMPUTE_WH").collect()
+    except Exception:
+        # If warehouse check fails, set it explicitly
+        session.sql("USE WAREHOUSE COMPUTE_WH").collect()
+        
+    return session
 
 # Role-based access control
 ROLE_ACCESS = {
