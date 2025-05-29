@@ -32,13 +32,14 @@ def get_session():
             "client_session_keep_alive": True
         }
         try:
-            session = Session.builder.configs(conn_params).create()
-            # ACTIVATE WAREHOUSE EXPLICITLY
-            session.sql("USE WAREHOUSE COMPUTE_WH").collect()
-            return session
+            return Session.builder.configs(conn_params).create()
         except Exception as e:
             st.error(f"Error creating Snowflake session: {str(e)}")
             st.stop()
+
+
+
+
 
 # Role-based access control
 ROLE_ACCESS = {
