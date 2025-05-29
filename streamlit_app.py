@@ -919,7 +919,7 @@ def profile_page():
         """).collect()
         
         if earnings:
-            # Calculate total earnings
+            # Calculate total earningas
             total_earnings = sum(e['HOURS_WORKED'] * emp_rate for e in earnings)
             
             # Display earnings dataframe
