@@ -14,12 +14,22 @@ import os  # Add tahis import
 
 
 # Initialize Snowflake connection
+# Initialize Snowflake connection
 def get_session():
     try:
+        # First, try to get the active session (works inside Snowflake)
         return sp.context.get_active_session()
     except:
+        # Direct connection with explicit parameters
         conn_params = {
-            # ... your existing connection parameters ...
+            "account": "ACYRHOY-MR97012",  # Try adding region if needed: "ACYRHOY-MR97012.us-east-1"
+            "user": "DIBA",
+            "password": "Potomachvac200$",
+            "role": "SYSADMIN",
+            "warehouse": "COMPUTE_WH",
+            "database": "POTOMAC_HVAC",
+            "schema": "PUBLIC",
+            "client_session_keep_alive": True
         }
         try:
             session = Session.builder.configs(conn_params).create()
