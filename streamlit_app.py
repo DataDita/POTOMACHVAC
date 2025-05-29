@@ -1,74 +1,18 @@
-# Import python packages
+
+
 import streamlit as st
-from snowflake.snowpark.context import get_active_session
-
-# Get the current credentials
-session = get_active_session()
-
-
-
-import streamlit.components.v1 as components
-import streamlit as st
-import snowflake.snowpark as sp
 from snowflake.snowpark import Session
+import snowflake.snowpark as sp
 from datetime import datetime, timedelta, time
-import re
-import uuid
-import hashlib
-from PIL import Image, ImageOps
-import io
-import base64
 import pandas as pd
-
-
-import streamlit as st
-import snowflake.snowpark as sp
-from snowflake.snowpark.functions import col
-cnx=st.connection("snowflake")
-session = cnx.session()
-from snowflake.snowpark import Session
-from datetime import datetime, timedelta
 import re
 import uuid
 import hashlib
 import base64
-from PIL import Image
-import io
-# Add this helper function with your imports
 from PIL import Image, ImageOps
 import io
-# Import python packages
-import streamlit as st
-from snowflake.snowpark.functions import col
 import requests
-
-
-##########################################################################################
-##########################################################################################
-##########################################################################################
-
-def crop_to_square(image_bytes):
-    img = Image.open(io.BytesIO(image_bytes))
-    return ImageOps.fit(img, (120, 120))  # Crop to square
-
-def process_image(image_bytes, target_width):
-    """Resize image while maintaining quality and aspect ratio"""
-    img = Image.open(io.BytesIO(image_bytes))
-    
-    # Calculate proportional height
-    width_percent = (target_width / float(img.size[0]))
-    height = int((float(img.size[1]) * float(width_percent)))
-    
-    # High-quality resizing
-    img = img.resize((target_width, height), Image.Resampling.LANCZOS)
-    
-    # Convert back to bytes
-    buffer = io.BytesIO()
-    img.save(buffer, format="JPEG", quality=95)  # 95% quality
-    return buffer.getvalue()
-
-##########################################################################################
-##########################################################################################
+import os  # Add this import
 
 # Initialize Snowflake connection
 def get_session():
@@ -81,6 +25,16 @@ ROLE_ACCESS = {
     'technician': ['Home', 'profile', 'quotes', 'invoices', 'payments', 'equipment'],
     'driver': ['Home', 'profile', 'driver_tasks']
 }
+
+
+
+
+
+##########################################################################################
+##########################################################################################
+##########################################################################################
+
+
 ##########################################################################################
 ##########################################################################################
 # Login page
@@ -620,6 +574,7 @@ def Home():
             # Create Google Maps link
             maps_url = f"https://www.google.com/maps/search/?api=1&query={full_address.replace(' ', '+')}"
             
+
             # Expandable section for detailed customer info
             with st.expander(f"**{appt['CUSTOMER_NAME']}** - {appt['ADDRESS']}, {appt['CITY']}"):
                 # Clickable address link
@@ -1345,9 +1300,6 @@ def customer_management():
                         st.error(f"Error adding customer: {str(e)}")
 
     # --- Customer Search and Display Section ---
-    
-
-    
     st.subheader("🔍 Search Customers")
     search_term = st.text_input("", placeholder="Search by name, phone, email, or address", key="unified_search")
     
@@ -1374,9 +1326,10 @@ def customer_management():
                                             'INDOOR_UNIT_SERIAL_NUMBER', 'THERMOSTAT_TYPE', 'UNIT_LOCATION', 
                                             'ACCESSIBILITY_LEVEL', 'ACCESSIBILITY_NOTES', 'OTHER_NOTES'], customer))
                 
-                with st.expander(f"{customer_dict['NAME']} - {customer_dict['PHONE']}"):
+                with st.container():
+                    st.subheader(f"{customer_dict['NAME']} - {customer_dict['PHONE']}")
+                    
                     # Customer Information
-                    st.subheader("Customer Information")
                     col1, col2 = st.columns(2)
                     
                     with col1:
@@ -1415,6 +1368,7 @@ def customer_management():
                         )
                         if has_safety_alarm == 'Yes' and not safety_alarm_code:
                             st.error("Safety alarm code is required when safety alarm is present")
+                            pass
                     
                     st.write(f"**How Heard:** {customer_dict.get('HOW_HEARD', 'Not specified')}")
                     st.write(f"**General Note:** {customer_dict.get('NOTE', 'None')}")
@@ -1432,23 +1386,68 @@ def customer_management():
                     
                     if appointments:
                         for appt in appointments:
-                            try:
-                                appt_dict = appt.as_dict() if hasattr(appt, 'as_dict') else dict(zip(appt._fields, appt))
-                                with st.expander(f"{appt_dict['SCHEDULED_TIME'].strftime('%Y-%m-%d %I:%M %p')} - {appt_dict['SERVICE_TYPE']} ({appt_dict['STA_TUS']})"):
-                                    st.write(f"**Technician:** {appt_dict['TECHNICIAN_NAME']}")
-                                    st.write(f"**Service Type:** {appt_dict['SERVICE_TYPE']}")
-                                    st.write(f"**Status:** {appt_dict['STA_TUS']}")
-                                    if appt_dict.get('NOTES'):
-                                        st.write(f"**Notes:** {appt_dict['NOTES']}")
-                            except:
-                                pass
+                            # CHANGED: Use columns instead of expander for appointments
+                            cols = st.columns([1,2,1])
+                            with cols[0]:
+                                st.write(f"**{appt['SCHEDULED_TIME'].strftime('%Y-%m-%d %I:%M %p')}**")
+                            with cols[1]:
+                                st.write(f"{appt['SERVICE_TYPE']} ({appt['STA_TUS']})")
+                                st.write(f"Technician: {appt['TECHNICIAN_NAME']}")
+                            with cols[2]:
+                                if st.button("View Details", key=f"appt_details_{appt['APPOINTMENTID']}"):
+                                    st.session_state['view_appt'] = appt['APPOINTMENTID']
                     else:
                         st.info("No appointments scheduled for this customer")
                     
                     # Equipment Information
                     st.subheader("Equipment Information")
-                    # ... [rest of equipment info display remains the same] ...
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**Outdoor Unit:** {customer_dict.get('OUTDOOR_UNIT_MODEL', 'N/A')}")
+                        st.write(f"**Serial #:** {customer_dict.get('OUTDOOR_UNIT_SERIAL_NUMBER', 'N/A')}")
+                        st.write(f"**Indoor Unit:** {customer_dict.get('INDOOR_UNIT_MODEL', 'N/A')}")
+                        st.write(f"**Serial #:** {customer_dict.get('INDOOR_UNIT_SERIAL_NUMBER', 'N/A')}")
+                    with col2:
+                        st.write(f"**Thermostat:** {customer_dict.get('THERMOSTAT_TYPE', 'N/A')}")
+                        st.write(f"**Location:** {customer_dict.get('UNIT_LOCATION', 'N/A')}")
+                        st.write(f"**Accessibility:** {customer_dict.get('ACCESSIBILITY_LEVEL', 'N/A')}")
                     
+                    # Display uploaded pictures
+                    st.subheader("Unit Pictures")
+                    docs = session.sql(f"""
+                    SELECT DOC_ID, DESCRIPTION, UPLOADED_AT 
+                    FROM customer_documents 
+                    WHERE CUSTOMERID = '{customer_dict['CUSTOMERID']}'
+                    AND DOC_TYPE = 'IMAGE'
+                    ORDER BY UPLOADED_AT DESC
+                    """).collect()
+
+                    if docs:
+                        # Display images in columns
+                        cols = st.columns(min(3, len(docs)))
+                        for i, doc in enumerate(docs):
+                            with cols[i % 3]:
+                                # Retrieve full image data
+                                img_data = session.sql(f"""
+                                SELECT DOC_DATA FROM customer_documents
+                                WHERE DOC_ID = '{doc['DOC_ID']}'
+                                """).collect()[0]['DOC_DATA']
+                                
+                                if img_data:
+                                    try:
+                                        # Display image with use_container_width instead of use_column_width
+                                        img = Image.open(io.BytesIO(base64.b64decode(img_data)))
+                                        st.image(img, 
+                                                 caption=doc['DESCRIPTION'], 
+                                                 use_container_width=True)  # This is the fixed parameter
+                                        st.caption(f"{doc['UPLOADED_AT'].strftime('%Y-%m-%d')}")
+                                    except:
+                                        st.error("Could not display image")
+                    else:
+                      st.info("No unit pictures available")
+
+
+    
                     # Action buttons
                     col1, col2, col3 = st.columns(3)
                     with col1:
@@ -1465,7 +1464,6 @@ def customer_management():
                         if st.button("Upload Picture", key=f"pic_{customer_dict['CUSTOMERID']}"):
                             st.session_state['add_picture_customer'] = customer_dict['CUSTOMERID']
                             st.rerun()
-
 
     # --- Add Unit Picture Section ---
     if 'add_picture_customer' in st.session_state:
@@ -1974,9 +1972,9 @@ def customer_management():
                     del st.session_state['edit_customer']
                     del st.session_state['customer_to_edit']
                     st.rerun()
-        
-        
-        
+
+
+
 ############################################################
 #######################################################################
 #######################################################################
@@ -2360,11 +2358,11 @@ def admin_tables():
     st.subheader("🛠 Admin Tables")
     session = get_session()
     
-    # List of all tables including the schedule table
+    
     tables = [
-        "employees", "customers", "appointments", "quotes", "jobs", 
-        "invoices", "roles", "employee_roles", "payment_methods", 
-        "payments", "allservices", "equipment", "materials", "employee_schedules"
+        "employees", "customers", "appointments", 
+        "roles", "employee_roles", "expertise", "employee_expertise",
+     "employee_schedules"
     ]
     
     # Select table to manage
@@ -2737,5 +2735,3 @@ if __name__ == '__main__':
         login_page()
     else:
         main_app()
-        
-	
