@@ -1,5 +1,3 @@
-
-
 import streamlit as st
 from snowflake.snowpark import Session
 import snowflake.snowpark as sp
@@ -25,7 +23,6 @@ ROLE_ACCESS = {
     'technician': ['Home', 'profile', 'quotes', 'invoices', 'payments', 'equipment'],
     'driver': ['Home', 'profile', 'driver_tasks']
 }
-
 
 
 
@@ -2735,6 +2732,3 @@ if __name__ == '__main__':
         login_page()
     else:
         main_app()
-
-
-
