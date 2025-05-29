@@ -10,11 +10,31 @@ import base64
 from PIL import Image, ImageOps
 import io
 import requests
-import os  # Add this import
+import os  # Add tahis import
+
 
 # Initialize Snowflake connection
 def get_session():
-    return sp.context.get_active_session()
+    try:
+        # First, try to get the active session (works inside Snowflake)
+        return sp.context.get_active_session()
+    except:
+        # Direct connection with explicit parameters
+        conn_params = {
+            "account": "ACYRHOY-MR97012",  # Try adding region if needed: "ACYRHOY-MR97012.us-east-1"
+            "user": "DIBA",
+            "password": "Potomachvac200$",
+            "role": "SYSADMIN",
+            "warehouse": "COMPUTE_WH",
+            "database": "POTOMAC_HVAC",
+            "schema": "PUBLIC",
+            "client_session_keep_alive": True
+        }
+        try:
+            return Session.builder.configs(conn_params).create()
+        except Exception as e:
+            st.error(f"Error creating Snowflake session: {str(e)}")
+            st.stop()
 
 # Role-based access control
 ROLE_ACCESS = {
