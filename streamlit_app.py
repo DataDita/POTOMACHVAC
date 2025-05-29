@@ -13,13 +13,17 @@ import requests
 import os  # Add tahis import
 
 
-# Initialize Snowflake connection
+##########################################################################################
+##########################################################################################
+##########################################################################################
+
 # Initialize Snowflake connection
 def get_session():
     try:
         session = sp.context.get_active_session()
         session.sql("USE WAREHOUSE COMPUTE_WH").collect()  # ADD THIS
-        return session    
+        return session
+    
     
     except:
         # Direct connection with explicit parameters
@@ -40,8 +44,9 @@ def get_session():
             st.stop()
 
 
-
-
+##########################################################################################
+##########################################################################################
+##########################################################################################
 
 # Role-based access control
 ROLE_ACCESS = {
@@ -548,10 +553,10 @@ def Home():
     # Query database for appointments
     appointments = session.sql(f"""
         SELECT 
-            a.appointmentid,
-            a.service_type,
-            a.scheduled_time,
-            a.sta_tus,
+            a.APPOINTMENTID,
+            a.SERVICE_TYPE,
+            a.SCHEDULED_TIME,
+            a.STA_TUS,
             c.name AS customer_name,
             c.address,
             c.unit,
@@ -569,11 +574,11 @@ def Home():
             c.phone,
             c.email
         FROM appointments a
-        JOIN customers c ON a.customerid = c.customerid
-        WHERE a.technicianid = '{st.session_state.user_id}'
-        AND a.scheduled_time BETWEEN CURRENT_TIMESTAMP() 
+        JOIN customers c ON a.CUSTOMERID = c.CUSTOMERID
+        WHERE a.TECHNICIANID = '{st.session_state.user_id}'
+        AND a.SCHEDULED_TIME BETWEEN CURRENT_TIMESTAMP() 
             AND DATEADD('day', 7, CURRENT_TIMESTAMP())
-        ORDER BY a.scheduled_time
+        ORDER BY a.SCHEDULED_TIME
     """).collect()
 
     if not appointments:  # Handle no appointments case
@@ -788,7 +793,7 @@ def profile_page():
             SELECT * FROM employee_schedules
             WHERE employeeid = '{st.session_state.user_id}'
             AND schedule_date BETWEEN '{start_date}' AND '{end_date}'
-            ORDER BY schedule_date, start_time
+            ORDER BY schedule_date, START_TIME
         """).collect()
         
         # Custom CSS styling for schedule table
@@ -969,15 +974,15 @@ def profile_page():
         appointments = session.sql(f"""
             SELECT 
                 c.name as customer,
-                a.scheduled_time,
-                TO_VARCHAR(a.scheduled_time, 'HH12:MI AM') as time,
-                a.sta_tus as status,
+                a.SCHEDULED_TIME,
+                TO_VARCHAR(a.SCHEDULED_TIME, 'HH12:MI AM') as time,
+                a.STA_TUS as status,
                 a.notes
             FROM appointments a
-            JOIN customers c ON a.customerid = c.customerid
-            WHERE a.technicianid = '{st.session_state.user_id}'
-            AND DATE(a.scheduled_time) BETWEEN '{start_date}' AND '{end_date}'
-            ORDER BY a.scheduled_time
+            JOIN customers c ON a.CUSTOMERID = c.CUSTOMERID
+            WHERE a.TECHNICIANID = '{st.session_state.user_id}'
+            AND DATE(a.SCHEDULED_TIME) BETWEEN '{start_date}' AND '{end_date}'
+            ORDER BY a.SCHEDULED_TIME
         """).collect()
         
         if appointments:
@@ -1403,9 +1408,9 @@ def customer_management():
                     appointments = session.sql(f"""
                         SELECT a.*, e.ename as technician_name 
                         FROM appointments a
-                        JOIN employees e ON a.technicianid = e.employeeid
-                        WHERE a.customerid = '{customer_dict['CUSTOMERID']}'
-                        ORDER BY a.scheduled_time DESC
+                        JOIN employees e ON a.TECHNICIANID = e.employeeid
+                        WHERE a.CUSTOMERID = '{customer_dict['CUSTOMERID']}'
+                        ORDER BY a.SCHEDULED_TIME DESC
                     """).collect()
                     
                     if appointments:
@@ -1567,10 +1572,10 @@ def customer_management():
                 
                 # Get already booked installation days
                 booked_days = session.sql(f"""
-                    SELECT DISTINCT DATE(scheduled_time) as day 
+                    SELECT DISTINCT DATE(SCHEDULED_TIME) as day 
                     FROM appointments 
-                    WHERE service_type = 'Install'
-                    AND DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=28)}'
+                    WHERE SERVICE_TYPE = 'Install'
+                    AND DATE(SCHEDULED_TIME) BETWEEN '{start_date}' AND '{start_date + timedelta(days=28)}'
                 """).collect()
                 booked_days = [row['DAY'] for row in booked_days]
                 
@@ -1619,8 +1624,8 @@ def customer_management():
                             # Book primary technician for full day (8AM-5PM)
                             session.sql(f"""
                                 INSERT INTO appointments (
-                                    appointmentid, customerid, technicianid,
-                                    scheduled_time, service_type, notes, sta_tus
+                                    APPOINTMENTID, CUSTOMERID, TECHNICIANID,
+                                    SCHEDULED_TIME, SERVICE_TYPE, notes, STA_TUS
                                 ) VALUES (
                                     'APT{datetime.now().timestamp()}',
                                     '{st.session_state['selected_customer_id']}',
@@ -1636,8 +1641,8 @@ def customer_management():
                             if secondary_tech:
                                 session.sql(f"""
                                     INSERT INTO appointments (
-                                        appointmentid, customerid, technicianid,
-                                        scheduled_time, service_type, notes, sta_tus
+                                        APPOINTMENTID, CUSTOMERID, TECHNICIANID,
+                                        SCHEDULED_TIME, SERVICE_TYPE, notes, STA_TUS
                                     ) VALUES (
                                         'APT{datetime.now().timestamp()}',
                                         '{st.session_state['selected_customer_id']}',
@@ -1685,8 +1690,8 @@ def customer_management():
                 # Get existing appointments
                 appointments = session.sql(f"""
                     SELECT * FROM appointments
-                    WHERE DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
-                    AND sta_tus != 'cancelled'
+                    WHERE DATE(SCHEDULED_TIME) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
+                    AND STA_TUS != 'cancelled'
                 """).collect()
                 
                 # Create calendar with 2-hour slots (8AM-6PM)
@@ -1767,10 +1772,10 @@ def customer_management():
                             # Check availability again
                             existing = session.sql(f"""
                                 SELECT * FROM appointments
-                                WHERE technicianid = '{primary_tech}'
-                                AND DATE(scheduled_time) = '{slot['datetime'].date()}'
-                                AND HOUR(scheduled_time) = {slot['datetime'].hour}
-                                AND sta_tus != 'cancelled'
+                                WHERE TECHNICIANID = '{primary_tech}'
+                                AND DATE(SCHEDULED_TIME) = '{slot['datetime'].date()}'
+                                AND HOUR(SCHEDULED_TIME) = {slot['datetime'].hour}
+                                AND STA_TUS != 'cancelled'
                             """).collect()
                             
                             if existing:
@@ -1781,8 +1786,8 @@ def customer_management():
                             # Book primary technician
                             session.sql(f"""
                                 INSERT INTO appointments (
-                                    appointmentid, customerid, technicianid, 
-                                    scheduled_time, service_type, notes, sta_tus
+                                    APPOINTMENTID, CUSTOMERID, TECHNICIANID, 
+                                    SCHEDULED_TIME, SERVICE_TYPE, notes, STA_TUS
                                 ) VALUES (
                                     'APT{datetime.now().timestamp()}',
                                     '{st.session_state['selected_customer_id']}',
@@ -1798,8 +1803,8 @@ def customer_management():
                             if secondary_tech:
                                 session.sql(f"""
                                     INSERT INTO appointments (
-                                        appointmentid, customerid, technicianid, 
-                                        scheduled_time, service_type, notes, sta_tus
+                                        APPOINTMENTID, CUSTOMERID, TECHNICIANID, 
+                                        SCHEDULED_TIME, SERVICE_TYPE, notes, STA_TUS
                                     ) VALUES (
                                         'APT{datetime.now().timestamp()}',
                                         '{st.session_state['selected_customer_id']}',
@@ -2015,7 +2020,7 @@ def appointments():
     
     # Fetch customers
     customers = session.sql(f"""
-        SELECT customerid, name, phone FROM customers 
+        SELECT CUSTOMERID, name, phone FROM customers 
         {'WHERE NAME ILIKE ' + f"'%{search_query}%'" if search_query else ''}
         ORDER BY name
     """).collect()
@@ -2062,10 +2067,10 @@ def appointments():
         
         # Get already booked installation days
         booked_days = session.sql(f"""
-            SELECT DISTINCT DATE(scheduled_time) as day 
+            SELECT DISTINCT DATE(SCHEDULED_TIME) as day 
             FROM appointments 
-            WHERE service_type = 'Install'
-            AND DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=28)}'
+            WHERE SERVICE_TYPE = 'Install'
+            AND DATE(SCHEDULED_TIME) BETWEEN '{start_date}' AND '{start_date + timedelta(days=28)}'
         """).collect()
         booked_days = [row['DAY'] for row in booked_days]
         
@@ -2113,8 +2118,8 @@ def appointments():
                     # Book primary technician for full day (8AM-5PM)
                     session.sql(f"""
                         INSERT INTO appointments (
-                            appointmentid, customerid, technicianid,
-                            scheduled_time, service_type, notes, sta_tus
+                            APPOINTMENTID, CUSTOMERID, TECHNICIANID,
+                            SCHEDULED_TIME, SERVICE_TYPE, notes, STA_TUS
                         ) VALUES (
                             'APT{datetime.now().timestamp()}',
                             '{selected_customer_id}',
@@ -2130,8 +2135,8 @@ def appointments():
                     if secondary_tech:
                         session.sql(f"""
                             INSERT INTO appointments (
-                                appointmentid, customerid, technicianid,
-                                scheduled_time, service_type, notes, sta_tus
+                                APPOINTMENTID, CUSTOMERID, TECHNICIANID,
+                                SCHEDULED_TIME, SERVICE_TYPE, notes, STA_TUS
                             ) VALUES (
                                 'APT{datetime.now().timestamp()}',
                                 '{selected_customer_id}',
@@ -2177,8 +2182,8 @@ def appointments():
         # Get existing appointments
         appointments = session.sql(f"""
             SELECT * FROM appointments
-            WHERE DATE(scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
-            AND sta_tus != 'cancelled'
+            WHERE DATE(SCHEDULED_TIME) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
+            AND STA_TUS != 'cancelled'
         """).collect()
         
         # Create calendar with 2-hour slots (8AM-6PM)
@@ -2257,10 +2262,10 @@ def appointments():
                     # Check availability again
                     existing = session.sql(f"""
                         SELECT * FROM appointments
-                        WHERE technicianid = '{primary_tech}'
-                        AND DATE(scheduled_time) = '{slot['datetime'].date()}'
-                        AND HOUR(scheduled_time) = {slot['datetime'].hour}
-                        AND sta_tus != 'cancelled'
+                        WHERE TECHNICIANID = '{primary_tech}'
+                        AND DATE(SCHEDULED_TIME) = '{slot['datetime'].date()}'
+                        AND HOUR(SCHEDULED_TIME) = {slot['datetime'].hour}
+                        AND STA_TUS != 'cancelled'
                     """).collect()
                     
                     if existing:
@@ -2271,8 +2276,8 @@ def appointments():
                     # Book primary technician
                     session.sql(f"""
                         INSERT INTO appointments (
-                            appointmentid, customerid, technicianid, 
-                            scheduled_time, service_type, notes, sta_tus
+                            APPOINTMENTID, CUSTOMERID, TECHNICIANID, 
+                            SCHEDULED_TIME, SERVICE_TYPE, notes, STA_TUS
                         ) VALUES (
                             'APT{datetime.now().timestamp()}',
                             '{selected_customer_id}',
@@ -2288,8 +2293,8 @@ def appointments():
                     if secondary_tech:
                         session.sql(f"""
                             INSERT INTO appointments (
-                                appointmentid, customerid, technicianid, 
-                                scheduled_time, service_type, notes, sta_tus
+                                APPOINTMENTID, CUSTOMERID, TECHNICIANID, 
+                                SCHEDULED_TIME, SERVICE_TYPE, notes, STA_TUS
                             ) VALUES (
                                 'APT{datetime.now().timestamp()}',
                                 '{selected_customer_id}',
@@ -2312,18 +2317,18 @@ def appointments():
     st.subheader("Current Appointments This Week")
     current_appts = session.sql(f"""
         SELECT 
-            a.appointmentid,
+            a.APPOINTMENTID,
             c.name as customer_name,
             e.ename as technician_name,
-            a.scheduled_time,
-            a.service_type,
-            a.sta_tus,
+            a.SCHEDULED_TIME,
+            a.SERVICE_TYPE,
+            a.STA_TUS,
             a.notes
         FROM appointments a
-        JOIN customers c ON a.customerid = c.customerid
-        JOIN employees e ON a.technicianid = e.employeeid
-        WHERE DATE(a.scheduled_time) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
-        ORDER BY a.scheduled_time
+        JOIN customers c ON a.CUSTOMERID = c.CUSTOMERID
+        JOIN employees e ON a.TECHNICIANID = e.employeeid
+        WHERE DATE(a.SCHEDULED_TIME) BETWEEN '{start_date}' AND '{start_date + timedelta(days=6)}'
+        ORDER BY a.SCHEDULED_TIME
     """).collect()
     
     if current_appts:
@@ -2417,7 +2422,7 @@ def admin_tables():
             FROM employee_schedules s
             JOIN employees e ON s.employeeid = e.employeeid
             WHERE s.schedule_date BETWEEN '{start_date}' AND '{end_date}'
-            ORDER BY s.schedule_date, s.start_time
+            ORDER BY s.schedule_date, s.START_TIME
         """).collect()
         
         # Create calendar view - days as columns, hours as rows
@@ -2524,15 +2529,15 @@ def admin_tables():
                         max_value=end_date
                     )
                 with col2:
-                    start_time = st.time_input("Start Time", value=time(8, 0))
-                    end_time = st.time_input("End Time", value=time(17, 0))
+                    START_TIME = st.time_input("Start Time", value=time(8, 0))
+                    END_TIME = st.time_input("End Time", value=time(17, 0))
                 
                 notes = st.text_input("Notes (optional)")
                 
                 submitted = st.form_submit_button("Save Schedule")
                 if submitted:
                     # Validate time range
-                    if start_time >= end_time:
+                    if START_TIME >= END_TIME:
                         st.error("End time must be after start time!")
                     else:
                         # Check for existing schedules that conflict
@@ -2541,7 +2546,7 @@ def admin_tables():
                             WHERE employeeid = '{employee}'
                             AND schedule_date = '{schedule_date}'
                             AND (
-                                (start_time < '{end_time}' AND end_time > '{start_time}')
+                                (START_TIME < '{END_TIME}' AND END_TIME > '{START_TIME}')
                             )
                         """).collect()
                         
@@ -2554,8 +2559,8 @@ def admin_tables():
                                     SELECT * FROM employee_schedules
                                     WHERE employeeid = '{employee}'
                                     AND schedule_date = '{schedule_date}'
-                                    AND start_time = '{start_time}'
-                                    AND end_time = '{end_time}'
+                                    AND START_TIME = '{START_TIME}'
+                                    AND END_TIME = '{END_TIME}'
                                 """).collect()
                                 
                                 if duplicate:
@@ -2565,13 +2570,13 @@ def admin_tables():
                                     session.sql(f"""
                                         INSERT INTO employee_schedules (
                                             scheduleid, employeeid, schedule_date, 
-                                            start_time, end_time, notes
+                                            START_TIME, END_TIME, notes
                                         ) VALUES (
                                             '{schedule_id}',
                                             '{employee}',
                                             '{schedule_date}',
-                                            '{start_time}',
-                                            '{end_time}',
+                                            '{START_TIME}',
+                                            '{END_TIME}',
                                             '{notes.replace("'", "''")}'
                                         )
                                     """).collect()
