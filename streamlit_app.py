@@ -17,8 +17,10 @@ import os  # Add tahis import
 # Initialize Snowflake connection
 def get_session():
     try:
-        # First, try to get the active session (works inside Snowflake)
-        return sp.context.get_active_session()
+        session = sp.context.get_active_session()
+        session.sql("USE WAREHOUSE COMPUTE_WH").collect()  # ADD THIS
+        return session    
+    
     except:
         # Direct connection with explicit parameters
         conn_params = {
